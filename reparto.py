@@ -42,7 +42,8 @@ def conectar_sheets():
     info = json.loads(st.secrets["gcp_json"])
     credenciales = Credentials.from_service_account_info(
         info, 
-        scopes=["https://www.googleapis.com/auth/spreadsheets"]
+        scopes=["https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"]
     )
     return gspread.authorize(credenciales)
 
