@@ -50,30 +50,52 @@ if "monto_calculadora" not in st.session_state:
     st.session_state.monto_calculadora = ""
 if "lista_filtrada" not in st.session_state:
     st.session_state.lista_filtrada = []
+if "mapping_zonas" not in st.session_state:
+    st.session_state.mapping_zonas = {}
 
-# --- 4. CARGA DE DATOS OPTIMIZADA (SÓLO UNA VEZ AL INICIAR) ---
-if "data_clientes" not in st.session_state or "data_control" not in st.session_state:
+# --- 4. CARGA Y PROCESAMIENTO OPTIMIZADO (SÓLO UNA VEZ) ---
+if "data_clientes" not in st.session_state or "data_control" not in st.session_state or not st.session_state.mapping_zonas:
     with st.spinner("Sincronizando planillas con el servidor..."):
         try:
             st.session_state.data_clientes = hoja_clientes.get_all_records()
             st.session_state.data_control = control_hoja.get_all_records()
+            
+            # Procesamos el mapeo de zonas ACÁ una sola vez para evitar lentitud
+            mapping = {}
+            for row in st.session_state.data_clientes:
+                keys = list(row.keys())
+                key_cliente = next((k for k in keys if 'nombre' in k.lower() or 'razón' in k.lower() or 'razon' in k.lower() or k.lower() == 'cliente'), None)
+                key_zona = next((k for k in keys if 'zona' in k.lower() or 'reparto' in k.lower()), None)
+                
+                if key_cliente and key_zona:
+                    nom = str(row.get(key_cliente, '')).strip()
+                    zon = str(row.get(key_zona, '')).strip().upper()
+                    if nom:
+                        mapping[nom] = zon
+            st.session_state.mapping_zonas = mapping
         except Exception as e:
             st.error(f"Error al leer los datos de la planilla: {e}")
             st.stop()
 
-# --- 5. PROCESAMIENTO DE MAPEO DE ZONAS (Clientes -> P o C) ---
-mapping_zonas = {}
-for row in st.session_state.data_clientes:
-    keys = list(row.keys())
-    # Corrección clave: Buscamos 'Nombre / Razón Social' o cualquier variante de nombre/cliente
-    key_cliente = next((k for k in keys if 'nombre' in k.lower() or 'razón' in k.lower() or 'razon' in k.lower() or k.lower() == 'cliente'), None)
-    key_zona = next((k for k in keys if 'zona' in k.lower() or 'reparto' in k.lower()), None)
-    
-    if key_cliente and key_zona:
-        nom = str(row.get(key_cliente, '')).strip()
-        zon = str(row.get(key_zona, '')).strip().upper()  # Forzamos mayúsculas (P o C)
-        if nom:
-            mapping_zonas[nom] = zon
+# --- 5. FUNCIONES CALLBACKS (PROCESAMIENTO INSTANTÁNEO) ---
+def click_numero(digito):
+    st.session_state.monto_calculadora += str(digito)
+
+def click_borrar():
+    st.session_state.monto_calculadora = st.session_state.monto_calculadora[:-1]
+
+def click_limpiar():
+    st.session_state.monto_calculadora = ""
+
+def avanzar_cliente():
+    if st.session_state.idx_cliente < len(st.session_state.lista_filtrada) - 1:
+        st.session_state.idx_cliente += 1
+        st.session_state.monto_calculadora = ""
+
+def retroceder_cliente():
+    if st.session_state.idx_cliente > 0:
+        st.session_state.idx_cliente -= 1
+        st.session_state.monto_calculadora = ""
 
 # --- PANTALLA 1: SELECCIÓN DE REPARTO (ZONA P o C) ---
 if st.session_state.reparto is None:
@@ -85,20 +107,20 @@ if st.session_state.reparto is None:
     if st.button("Iniciar Reparto", type="primary", use_container_width=True):
         st.session_state.reparto = reparto_elegido
         
-        # Filtramos los clientes de 'Control-Diario' que pertenecen a la zona seleccionada (P o C)
+        # Filtramos rápido usando el mapa en memoria
         clientes_filtrados = []
         for row in st.session_state.data_control:
             nom_cliente = str(row.get('Cliente', '')).strip()
-            if mapping_zonas.get(nom_cliente) == reparto_elegido:
+            if st.session_state.mapping_zonas.get(nom_cliente) == reparto_elegido:
                 clientes_filtrados.append(row)
         
-        # Ordenamos los clientes numéricamente según la columna N ('salida')
+        # Ordenamos por número de salida (Columna N)
         def obtener_orden_salida(row):
             val = str(row.get('salida', '')).strip()
             try:
                 return int(val)
             except ValueError:
-                return 9999  # Si no tiene número, lo manda al final
+                return 9999
         
         st.session_state.lista_filtrada = sorted(clientes_filtrados, key=obtener_orden_salida)
         st.session_state.idx_cliente = 0
@@ -117,10 +139,8 @@ else:
         st.stop()
         
     idx = st.session_state.idx_cliente
-    if idx >= len(lista):
-        idx = len(lista) - 1
-    if idx < 0:
-        idx = 0
+    if idx >= len(lista): idx = len(lista) - 1
+    if idx < 0: idx = 0
     st.session_state.idx_cliente = idx
     
     cliente_actual = lista[idx]
@@ -141,17 +161,9 @@ else:
     
     col_nav1, col_nav2 = st.columns(2)
     with col_nav1:
-        if st.button("◀️ Anterior", use_container_width=True):
-            if st.session_state.idx_cliente > 0:
-                st.session_state.idx_cliente -= 1
-                st.session_state.monto_calculadora = ""
-                st.rerun()
+        st.button("◀️ Anterior", use_container_width=True, on_click=retroceder_cliente)
     with col_nav2:
-        if st.button("Siguiente ▶️", use_container_width=True):
-            if st.session_state.idx_cliente < len(lista) - 1:
-                st.session_state.idx_cliente += 1
-                st.session_state.monto_calculadora = ""
-                st.rerun()
+        st.button("Siguiente ▶️", use_container_width=True, on_click=avanzar_cliente)
                 
     st.markdown(f"<p style='text-align: center; color: #6B7280; font-size: 14px;'>Cliente {idx + 1} de {len(lista)} de la zona {st.session_state.reparto}</p>", unsafe_allow_html=True)
     
@@ -164,63 +176,39 @@ else:
     </div>
     """, unsafe_allow_html=True)
     
+    # --- CALCULADORA ULTRA-RÁPIDA (CON CALLBACKS) ---
     col1, col2, col3 = st.columns(3)
-    
     with col1:
-        if st.button("1", use_container_width=True):
-            st.session_state.monto_calculadora += "1"
-            st.rerun()
-        if st.button("4", use_container_width=True):
-            st.session_state.monto_calculadora += "4"
-            st.rerun()
-        if st.button("7", use_container_width=True):
-            st.session_state.monto_calculadora += "7"
-            st.rerun()
-        if st.button("⌫ Borrar", use_container_width=True):
-            st.session_state.monto_calculadora = st.session_state.monto_calculadora[:-1]
-            st.rerun()
+        st.button("1", use_container_width=True, on_click=click_numero, args=("1",))
+        st.button("4", use_container_width=True, on_click=click_numero, args=("4",))
+        st.button("7", use_container_width=True, on_click=click_numero, args=("7",))
+        st.button("⌫ Borrar", use_container_width=True, on_click=click_borrar)
             
     with col2:
-        if st.button("2", use_container_width=True):
-            st.session_state.monto_calculadora += "2"
-            st.rerun()
-        if st.button("5", use_container_width=True):
-            st.session_state.monto_calculadora += "5"
-            st.rerun()
-        if st.button("8", use_container_width=True):
-            st.session_state.monto_calculadora += "8"
-            st.rerun()
-        if st.button("0", use_container_width=True):
-            st.session_state.monto_calculadora += "0"
-            st.rerun()
+        st.button("2", use_container_width=True, on_click=click_numero, args=("2",))
+        st.button("5", use_container_width=True, on_click=click_numero, args=("5",))
+        st.button("8", use_container_width=True, on_click=click_numero, args=("8",))
+        st.button("0", use_container_width=True, on_click=click_numero, args=("0",))
             
     with col3:
-        if st.button("3", use_container_width=True):
-            st.session_state.monto_calculadora += "3"
-            st.rerun()
-        if st.button("6", use_container_width=True):
-            st.session_state.monto_calculadora += "6"
-            st.rerun()
-        if st.button("9", use_container_width=True):
-            st.session_state.monto_calculadora += "9"
-            st.rerun()
-        if st.button("C Limpiar", use_container_width=True):
-            st.session_state.monto_calculadora = ""
-            st.rerun()
+        st.button("3", use_container_width=True, on_click=click_numero, args=("3",))
+        st.button("6", use_container_width=True, on_click=click_numero, args=("6",))
+        st.button("9", use_container_width=True, on_click=click_numero, args=("9",))
+        st.button("C Limpiar", use_container_width=True, on_click=click_limpiar)
             
     st.markdown("<br>", unsafe_allow_html=True)
     
+    # --- ESTE BOTÓN HACE TODO EL TRABAJO PESADO ---
     if st.button("🚚 CARGAR PAGO Y CONTINUAR", use_container_width=True, type="primary"):
         try:
             with st.spinner("Guardando pago en Google Sheets..."):
-                # Rastreamos al cliente en la columna B de Control-Diario
                 celda_cliente = control_hoja.find(nombre_cliente, in_column=2)
                 
                 if celda_cliente:
                     fila = celda_cliente.row
                     columna_pagos = 12  # Columna L (Pagos)
                     
-                    # Impactamos en la celda
+                    # Se sube el número completo recién acá
                     control_hoja.update_cell(fila, columna_pagos, monto_float)
                     st.toast(f"✅ ¡Pago de ${monto_float:.2f} guardado para {nombre_cliente}!", icon="💰")
                     
