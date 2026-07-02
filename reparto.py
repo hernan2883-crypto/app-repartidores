@@ -6,7 +6,7 @@ from google.oauth2.service_account import Credentials
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Reparto Panadería", page_icon="🍞", layout="centered")
 
-# Estilos visuales para la caja de saldos (idéntico a tu diseño)
+# Estilos visuales para la caja de saldos
 st.markdown("""
 <style>
 .caja-saldos {
@@ -24,15 +24,11 @@ st.markdown("""
 # --- 2. CONEXIÓN AUTENTICADA (Hojas + Drive) ---
 @st.cache_resource
 def conectar_sheets():
-    # Carga la clave secreta desde los Secrets de Streamlit
     informacion = json.loads(st.secrets["gcp_json"])
-    
-    # IMPORTANTE: Se incluyen ambos alcances (Scopes) para evitar el error 403
     alcances = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
-    
     credenciales = Credentials.from_service_account_info(informacion, scopes=alcances)
     return gspread.authorize(credenciales)
 
@@ -55,15 +51,18 @@ if "monto_calculadora" not in st.session_state:
 if "lista_filtrada" not in st.session_state:
     st.session_state.lista_filtrada = []
 
-# --- 4. CARGA Y FILTRADO DE DATOS ---
-# Traemos los datos de Control-Diario para armar el reparto en vivo
-try:
-    data_control = control_hoja.get_all_records()
-except Exception as e:
-    st.error(f"Error al leer los datos de la planilla: {e}")
-    st.stop()
+# --- 4. CARGA DE DATOS OPTIMIZADA (PROTECCIÓN CONTRA ERROR 429) ---
+# Guardamos los datos en la memoria de la sesión para NO llamar a Google con cada clic del teclado
+if "data_control" not in st.session_state:
+    try:
+        st.session_state.data_control = control_hoja.get_all_records()
+    except Exception as e:
+        st.error(f"Error al leer los datos de la planilla: {e}")
+        st.stop()
 
-# Extramos los números o repartos únicos de la columna 'salida' para armar el selector
+data_control = st.session_state.data_control
+
+# Extraemos los números o repartos únicos de la columna 'salida'
 todas_salidas = sorted(list(set([str(row['salida']) for row in data_control if row.get('salida') != ''])))
 
 # --- PANTALLA 1: SELECCIÓN DE REPARTO ---
@@ -75,7 +74,7 @@ if st.session_state.reparto is None:
     
     if st.button("Iniciar Reparto", type="primary", use_container_width=True):
         st.session_state.reparto = reparto_elegido
-        # Filtramos los clientes que corresponden a esta salida
+        # Filtramos los clientes correspondientes
         st.session_state.lista_filtrada = [row for row in data_control if str(row.get('salida')) == reparto_elegido]
         st.session_state.idx_cliente = 0
         st.session_state.monto_calculadora = ""
@@ -92,7 +91,6 @@ else:
             st.rerun()
         st.stop()
         
-    # Validar índice actual
     idx = st.session_state.idx_cliente
     if idx >= len(lista):
         idx = len(lista) - 1
@@ -100,22 +98,21 @@ else:
         idx = 0
     st.session_state.idx_cliente = idx
     
-    # Cliente actual en pantalla
     cliente_actual = lista[idx]
     nombre_cliente = cliente_actual["Cliente"]
     
-    # Botón superior para cambiar de reparto
     if st.button(f"⬅️ Cambiar Reparto (Saliendo de {st.session_state.reparto})", use_container_width=True):
         st.session_state.reparto = None
         st.session_state.lista_filtrada = []
+        # Al salir, limpiamos la memoria para que la próxima vez traiga datos frescos
+        if "data_control" in st.session_state:
+            del st.session_state.data_control
         st.rerun()
         
     st.markdown("<hr>", unsafe_allow_html=True)
     
-    # Nombre del Cliente Titular
     st.markdown(f"<h1 style='text-align: center; color: #1E3A8A; margin-bottom: 0px;'>{nombre_cliente}</h1>", unsafe_allow_html=True)
     
-    # Navegación Anterior / Siguiente
     col_nav1, col_nav2 = st.columns(2)
     with col_nav1:
         if st.button("◀️ Anterior", use_container_width=True):
@@ -132,7 +129,6 @@ else:
                 
     st.markdown(f"<p style='text-align: center; color: #6B7280; font-size: 14px;'>Cliente {idx + 1} de {len(lista)}</p>", unsafe_allow_html=True)
     
-    # Mostrar el monto que se va tipeando en la calculadora
     monto_texto = st.session_state.monto_calculadora if st.session_state.monto_calculadora != "" else "0"
     monto_float = float(monto_texto)
     
@@ -142,7 +138,6 @@ else:
     </div>
     """, unsafe_allow_html=True)
     
-    # --- TECLADO NUMÉRICO (CALCULADORA) ---
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -189,29 +184,29 @@ else:
             
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # --- BOTÓN DE CARGA A GOOGLE SHEETS ---
     if st.button("🚚 CARGAR PAGO Y CONTINUAR", use_container_width=True, type="primary"):
         try:
             with st.spinner("Guardando pago en Google Sheets..."):
-                # CORRECCIÓN CLAVE: Buscamos el nombre del cliente en la Columna B (columna 2)
                 celda_cliente = control_hoja.find(nombre_cliente, in_column=2)
                 
                 if celda_cliente:
                     fila = celda_cliente.row
-                    # Columna L es la columna número 12 (Pagos)
                     columna_pagos = 12
                     
-                    # Impactamos el valor en la planilla
                     control_hoja.update_cell(fila, columna_pagos, monto_float)
                     st.toast(f"✅ ¡Pago de ${monto_float:.2f} guardado para {nombre_cliente}!", icon="💰")
                     
-                    # Avanzar automáticamente al siguiente cliente de la lista
+                    # Actualizamos el valor en nuestra lista en memoria para que no haga falta recargar todo desde Google
+                    st.session_state.lista_filtrada[idx]["Pagos"] = monto_float
+                    
                     if st.session_state.idx_cliente < len(lista) - 1:
                         st.session_state.idx_cliente += 1
                         st.session_state.monto_calculadora = ""
                     else:
                         st.balloons()
                         st.success("🎉 ¡Completaste todos los clientes de este reparto!")
+                        if "data_control" in st.session_state:
+                            del st.session_state.data_control
                     st.rerun()
                 else:
                     st.error(f"No se encontró a '{nombre_cliente}' en la columna B de la planilla.")
