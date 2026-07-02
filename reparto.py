@@ -51,31 +51,56 @@ if "monto_calculadora" not in st.session_state:
 if "lista_filtrada" not in st.session_state:
     st.session_state.lista_filtrada = []
 
-# --- 4. CARGA DE DATOS OPTIMIZADA (PROTECCIÓN CONTRA ERROR 429) ---
-# Guardamos los datos en la memoria de la sesión para NO llamar a Google con cada clic del teclado
-if "data_control" not in st.session_state:
-    try:
-        st.session_state.data_control = control_hoja.get_all_records()
-    except Exception as e:
-        st.error(f"Error al leer los datos de la planilla: {e}")
-        st.stop()
+# --- 4. CARGA DE DATOS OPTIMIZADA (SÓLO UNA VEZ AL INICIAR) ---
+if "data_clientes" not in st.session_state or "data_control" not in st.session_state:
+    with st.spinner("Sincronizando planillas con el servidor..."):
+        try:
+            st.session_state.data_clientes = hoja_clientes.get_all_records()
+            st.session_state.data_control = control_hoja.get_all_records()
+        except Exception as e:
+            st.error(f"Error al leer los datos de la planilla: {e}")
+            st.stop()
 
-data_control = st.session_state.data_control
+# --- 5. PROCESAMIENTO DE MAPEO DE ZONAS (Clientes -> P o C) ---
+mapping_zonas = {}
+for row in st.session_state.data_clientes:
+    # Buscamos dinámicamente las columnas de Cliente y Zona Reparto (Columna E)
+    keys = list(row.keys())
+    key_cliente = next((k for k in keys if k.lower() == 'cliente'), 'Cliente')
+    key_zona = next((k for k in keys if 'zona' in k.lower() or 'reparto' in k.lower()), 'zona reparto')
+    
+    nom = str(row.get(key_cliente, '')).strip()
+    zon = str(row.get(key_zona, '')).strip().upper()  # Forzamos mayúsculas (P o C)
+    if nom:
+        mapping_zonas[nom] = zon
 
-# Extraemos los números o repartos únicos de la columna 'salida'
-todas_salidas = sorted(list(set([str(row['salida']) for row in data_control if row.get('salida') != ''])))
-
-# --- PANTALLA 1: SELECCIÓN DE REPARTO ---
+# --- PANTALLA 1: SELECCIÓN DE REPARTO (ZONA P o C) ---
 if st.session_state.reparto is None:
     st.title("🍞 Sistema de Reparto")
-    st.subheader("Seleccioná el reparto del día")
+    st.subheader("Seleccioná la zona de salida")
     
-    reparto_elegido = st.selectbox("Salida / Reparto:", todas_salidas)
+    # Damos a escoger estrictamente entre las dos salidas indicadas: P y C
+    reparto_elegido = st.selectbox("Salida / Reparto:", ["P", "C"])
     
     if st.button("Iniciar Reparto", type="primary", use_container_width=True):
         st.session_state.reparto = reparto_elegido
-        # Filtramos los clientes correspondientes
-        st.session_state.lista_filtrada = [row for row in data_control if str(row.get('salida')) == reparto_elegido]
+        
+        # Filtramos los clientes de 'Control-Diario' que pertenecen a la zona seleccionada (P o C)
+        clientes_filtrados = []
+        for row in st.session_state.data_control:
+            nom_cliente = str(row.get('Cliente', '')).strip()
+            if mapping_zonas.get(nom_cliente) == reparto_elegido:
+                clientes_filtrados.append(row)
+        
+        # Ordenamos los clientes numéricamente según la columna N ('salida')
+        def obtener_orden_salida(row):
+            val = str(row.get('salida', '')).strip()
+            try:
+                return int(val)
+            except ValueError:
+                return 9999  # Si no tiene número, lo manda al final
+        
+        st.session_state.lista_filtrada = sorted(clientes_filtrados, key=obtener_orden_salida)
         st.session_state.idx_cliente = 0
         st.session_state.monto_calculadora = ""
         st.rerun()
@@ -85,7 +110,7 @@ else:
     lista = st.session_state.lista_filtrada
     
     if not lista:
-        st.warning(f"No se encontraron clientes para el reparto '{st.session_state.reparto}'")
+        st.warning(f"No se encontraron clientes asignados a la zona '{st.session_state.reparto}' en Control-Diario.")
         if st.button("Volver"):
             st.session_state.reparto = None
             st.rerun()
@@ -100,18 +125,20 @@ else:
     
     cliente_actual = lista[idx]
     nombre_cliente = cliente_actual["Cliente"]
+    orden_recorrido = cliente_actual.get("salida", "-")
     
-    if st.button(f"⬅️ Cambiar Reparto (Saliendo de {st.session_state.reparto})", use_container_width=True):
+    if st.button(f"⬅️ Cambiar Zona (Saliendo de Reparto {st.session_state.reparto})", use_container_width=True):
         st.session_state.reparto = None
         st.session_state.lista_filtrada = []
-        # Al salir, limpiamos la memoria para que la próxima vez traiga datos frescos
-        if "data_control" in st.session_state:
-            del st.session_state.data_control
+        # Al salir limpiamos la memoria para forzar recarga fresca la próxima vez
+        if "data_clientes" in st.session_state: del st.session_state.data_clientes
+        if "data_control" in st.session_state: del st.session_state.data_control
         st.rerun()
         
     st.markdown("<hr>", unsafe_allow_html=True)
     
     st.markdown(f"<h1 style='text-align: center; color: #1E3A8A; margin-bottom: 0px;'>{nombre_cliente}</h1>", unsafe_allow_html=True)
+    st.markdown(f"<p style='text-align: center; color: #4B5563; font-size: 16px; font-weight: bold;'>Orden de entrega: #{orden_recorrido}</p>", unsafe_allow_html=True)
     
     col_nav1, col_nav2 = st.columns(2)
     with col_nav1:
@@ -127,7 +154,7 @@ else:
                 st.session_state.monto_calculadora = ""
                 st.rerun()
                 
-    st.markdown(f"<p style='text-align: center; color: #6B7280; font-size: 14px;'>Cliente {idx + 1} de {len(lista)}</p>", unsafe_allow_html=True)
+    st.markdown(f"<p style='text-align: center; color: #6B7280; font-size: 14px;'>Cliente {idx + 1} de {len(lista)} de la zona {st.session_state.reparto}</p>", unsafe_allow_html=True)
     
     monto_texto = st.session_state.monto_calculadora if st.session_state.monto_calculadora != "" else "0"
     monto_float = float(monto_texto)
@@ -187,17 +214,22 @@ else:
     if st.button("🚚 CARGAR PAGO Y CONTINUAR", use_container_width=True, type="primary"):
         try:
             with st.spinner("Guardando pago en Google Sheets..."):
+                # Buscamos al cliente en la columna B (Cliente) de Control-Diario
                 celda_cliente = control_hoja.find(nombre_cliente, in_column=2)
                 
                 if celda_cliente:
                     fila = celda_cliente.row
-                    columna_pagos = 12
+                    columna_pagos = 12  # Columna L (Pagos)
                     
+                    # Impactamos el valor en la celda correspondiente
                     control_hoja.update_cell(fila, columna_pagos, monto_float)
                     st.toast(f"✅ ¡Pago de ${monto_float:.2f} guardado para {nombre_cliente}!", icon="💰")
                     
-                    # Actualizamos el valor en nuestra lista en memoria para que no haga falta recargar todo desde Google
+                    # Actualizamos el estado interno de las listas para mantener consistencia
                     st.session_state.lista_filtrada[idx]["Pagos"] = monto_float
+                    for r in st.session_state.data_control:
+                        if str(r.get("Cliente")).strip() == nombre_cliente:
+                            r["Pagos"] = monto_float
                     
                     if st.session_state.idx_cliente < len(lista) - 1:
                         st.session_state.idx_cliente += 1
@@ -205,10 +237,10 @@ else:
                     else:
                         st.balloons()
                         st.success("🎉 ¡Completaste todos los clientes de este reparto!")
-                        if "data_control" in st.session_state:
-                            del st.session_state.data_control
+                        if "data_clientes" in st.session_state: del st.session_state.data_clientes
+                        if "data_control" in st.session_state: del st.session_state.data_control
                     st.rerun()
                 else:
-                    st.error(f"No se encontró a '{nombre_cliente}' en la columna B de la planilla.")
+                    st.error(f"No se encontró a '{nombre_cliente}' en la columna B de Control-Diario.")
         except Exception as e:
             st.error(f"Error crítico al guardar: {e}")
