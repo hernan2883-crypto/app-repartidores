@@ -6,7 +6,7 @@ from google.oauth2.service_account import Credentials
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Reparto Panadería", page_icon="🍞", layout="centered")
 
-# Estilos visuales para la caja de saldos
+# Estilos visuales para la interfaz
 st.markdown("""
 <style>
 .caja-saldos {
@@ -14,14 +14,23 @@ st.markdown("""
     padding: 15px;
     border-radius: 12px;
     text-align: center;
-    font-size: 18px !important;
+    font-size: 20px !important;
     margin-bottom: 15px;
     border: 1px solid #E5E7EB;
+}
+.caja-deuda {
+    background-color: #FEF2F2;
+    padding: 12px;
+    border-radius: 12px;
+    text-align: center;
+    font-size: 18px !important;
+    margin-bottom: 15px;
+    border: 1px solid #FCA5A5;
 }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. CONEXIÓN AUTENTICADA (Hojas + Drive) ---
+# --- 2. CONEXIÓN AUTENTICADA EN SEGUNDO PLANO ---
 @st.cache_resource
 def conectar_sheets():
     informacion = json.loads(st.secrets["gcp_json"])
@@ -32,14 +41,16 @@ def conectar_sheets():
     credenciales = Credentials.from_service_account_info(informacion, scopes=alcances)
     return gspread.authorize(credenciales)
 
-try:
-    gc = conectar_sheets()
-    doc = gc.open("Planilla_Maestra_Panaderia")
-    hoja_clientes = doc.worksheet("Clientes")
-    control_hoja = doc.worksheet("Control-Diario")
-except Exception as mi:
-    st.error(f"Error al conectar con Google Sheets: {mi}")
-    st.stop()
+# Guardamos las hojas en la memoria interna para que NO ralenticen los clics de la calculadora
+if "hoja_clientes" not in st.session_state or "control_hoja" not in st.session_state:
+    try:
+        gc = conectar_sheets()
+        doc = gc.open("Planilla_Maestra_Panaderia")
+        st.session_state.hoja_clientes = doc.worksheet("Clientes")
+        st.session_state.control_hoja = doc.worksheet("Control-Diario")
+    except Exception as mi:
+        st.error(f"Error al conectar con Google Sheets: {mi}")
+        st.stop()
 
 # --- 3. VARIABLES EN MEMORIA (ESTADO DE LA SESIÓN) ---
 if "reparto" not in st.session_state:
@@ -53,14 +64,14 @@ if "lista_filtrada" not in st.session_state:
 if "mapping_zonas" not in st.session_state:
     st.session_state.mapping_zonas = {}
 
-# --- 4. CARGA Y PROCESAMIENTO OPTIMIZADO (SÓLO UNA VEZ) ---
+# --- 4. CARGA Y PROCESAMIENTO OPTIMIZADO (SÓLO UNA VEZ AL INICIAR) ---
 if "data_clientes" not in st.session_state or "data_control" not in st.session_state or not st.session_state.mapping_zonas:
     with st.spinner("Sincronizando planillas con el servidor..."):
         try:
-            st.session_state.data_clientes = hoja_clientes.get_all_records()
-            st.session_state.data_control = control_hoja.get_all_records()
+            st.session_state.data_clientes = st.session_state.hoja_clientes.get_all_records()
+            st.session_state.data_control = st.session_state.control_hoja.get_all_records()
             
-            # Procesamos el mapeo de zonas ACÁ una sola vez para evitar lentitud
+            # Procesamos el mapeo de zonas
             mapping = {}
             for row in st.session_state.data_clientes:
                 keys = list(row.keys())
@@ -77,7 +88,7 @@ if "data_clientes" not in st.session_state or "data_control" not in st.session_s
             st.error(f"Error al leer los datos de la planilla: {e}")
             st.stop()
 
-# --- 5. FUNCIONES CALLBACKS (PROCESAMIENTO INSTANTÁNEO) ---
+# --- 5. FUNCIONES DE LA CALCULADORA (EJECUCIÓN INSTANTÁNEA) ---
 def click_numero(digito):
     st.session_state.monto_calculadora += str(digito)
 
@@ -107,14 +118,12 @@ if st.session_state.reparto is None:
     if st.button("Iniciar Reparto", type="primary", use_container_width=True):
         st.session_state.reparto = reparto_elegido
         
-        # Filtramos rápido usando el mapa en memoria
         clientes_filtrados = []
         for row in st.session_state.data_control:
             nom_cliente = str(row.get('Cliente', '')).strip()
             if st.session_state.mapping_zonas.get(nom_cliente) == reparto_elegido:
                 clientes_filtrados.append(row)
         
-        # Ordenamos por número de salida (Columna N)
         def obtener_orden_salida(row):
             val = str(row.get('salida', '')).strip()
             try:
@@ -147,7 +156,20 @@ else:
     nombre_cliente = cliente_actual["Cliente"]
     orden_recorrido = cliente_actual.get("salida", "-")
     
-    if st.button(f"⬅️ Cambiar Zona (Saliendo de Reparto {st.session_state.reparto})", use_container_width=True):
+    # --- BUSCADOR DINÁMICO DE LA COLUMNA C (DEUDA ANTERIOR) ---
+    keys_control = list(cliente_actual.keys())
+    # Buscamos por nombre de columna o por defecto la tercera columna (Índice 2 = Columna C)
+    key_deuda = next((k for k in keys_control if 'deuda' in k.lower() or 'anterior' in k.lower()), None)
+    if not key_deuda and len(keys_control) > 2:
+        key_deuda = keys_control[2]
+        
+    deuda_valor = cliente_actual.get(key_deuda, 0) if key_deuda else 0
+    try:
+        deuda_float = float(str(deuda_valor).replace(',', '.')) if deuda_valor else 0.0
+    except ValueError:
+        deuda_float = 0.0
+    
+    if st.button(f"⬅️ Cambiar Zona (Reparto {st.session_state.reparto})", use_container_width=True):
         st.session_state.reparto = None
         st.session_state.lista_filtrada = []
         if "data_clientes" in st.session_state: del st.session_state.data_clientes
@@ -159,24 +181,32 @@ else:
     st.markdown(f"<h1 style='text-align: center; color: #1E3A8A; margin-bottom: 0px;'>{nombre_cliente}</h1>", unsafe_allow_html=True)
     st.markdown(f"<p style='text-align: center; color: #4B5563; font-size: 16px; font-weight: bold;'>Orden de entrega: #{orden_recorrido}</p>", unsafe_allow_html=True)
     
+    # Visualización de la Deuda Anterior (Columna C)
+    st.markdown(f"""
+    <div class='caja-deuda'>
+        <span style='color: #DC2626; font-weight: bold;'>⚠️ Deuda Anterior: ${deuda_float:,.2f}</span>
+    </div>
+    """, unsafe_allow_html=True)
+    
     col_nav1, col_nav2 = st.columns(2)
     with col_nav1:
         st.button("◀️ Anterior", use_container_width=True, on_click=retroceder_cliente)
     with col_nav2:
         st.button("Siguiente ▶️", use_container_width=True, on_click=avanzar_cliente)
                 
-    st.markdown(f"<p style='text-align: center; color: #6B7280; font-size: 14px;'>Cliente {idx + 1} de {len(lista)} de la zona {st.session_state.reparto}</p>", unsafe_allow_html=True)
+    st.markdown(f"<p style='text-align: center; color: #6B7280; font-size: 14px;'>Cliente {idx + 1} de {len(lista)}</p>", unsafe_allow_html=True)
     
     monto_texto = st.session_state.monto_calculadora if st.session_state.monto_calculadora != "" else "0"
     monto_float = float(monto_texto)
     
+    # Caja de visualización formateada a un máximo de 2 decimales
     st.markdown(f"""
     <div class='caja-saldos'>
         <span style='color: #16A34A; font-weight: bold;'>Paga hoy: ${monto_float:,.2f}</span>
     </div>
     """, unsafe_allow_html=True)
     
-    # --- CALCULADORA ULTRA-RÁPIDA (CON CALLBACKS) ---
+    # --- CALCULADORA COMPLETAMENTE INSTANTÁNEA ---
     col1, col2, col3 = st.columns(3)
     with col1:
         st.button("1", use_container_width=True, on_click=click_numero, args=("1",))
@@ -198,24 +228,25 @@ else:
             
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # --- ESTE BOTÓN HACE TODO EL TRABAJO PESADO ---
+    # --- PROCESO DE CARGA ÚNICO ---
     if st.button("🚚 CARGAR PAGO Y CONTINUAR", use_container_width=True, type="primary"):
         try:
             with st.spinner("Guardando pago en Google Sheets..."):
-                celda_cliente = control_hoja.find(nombre_cliente, in_column=2)
+                celda_cliente = st.session_state.control_hoja.find(nombre_cliente, in_column=2)
                 
                 if celda_cliente:
                     fila = celda_cliente.row
                     columna_pagos = 12  # Columna L (Pagos)
                     
-                    # Se sube el número completo recién acá
-                    control_hoja.update_cell(fila, columna_pagos, monto_float)
-                    st.toast(f"✅ ¡Pago de ${monto_float:.2f} guardado para {nombre_cliente}!", icon="💰")
+                    # Redondeamos a 2 decimales antes de impactar en Sheets
+                    monto_final = round(monto_float, 2)
+                    st.session_state.control_hoja.update_cell(fila, columna_pagos, monto_final)
+                    st.toast(f"✅ ¡Pago de ${monto_final:.2f} guardado para {nombre_cliente}!", icon="💰")
                     
-                    st.session_state.lista_filtrada[idx]["Pagos"] = monto_float
+                    st.session_state.lista_filtrada[idx]["Pagos"] = monto_final
                     for r in st.session_state.data_control:
                         if str(r.get("Cliente")).strip() == nombre_cliente:
-                            r["Pagos"] = monto_float
+                            r["Pagos"] = monto_final
                     
                     if st.session_state.idx_cliente < len(lista) - 1:
                         st.session_state.idx_cliente += 1
