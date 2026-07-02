@@ -64,22 +64,22 @@ if "data_clientes" not in st.session_state or "data_control" not in st.session_s
 # --- 5. PROCESAMIENTO DE MAPEO DE ZONAS (Clientes -> P o C) ---
 mapping_zonas = {}
 for row in st.session_state.data_clientes:
-    # Buscamos dinámicamente las columnas de Cliente y Zona Reparto (Columna E)
     keys = list(row.keys())
-    key_cliente = next((k for k in keys if k.lower() == 'cliente'), 'Cliente')
-    key_zona = next((k for k in keys if 'zona' in k.lower() or 'reparto' in k.lower()), 'zona reparto')
+    # Corrección clave: Buscamos 'Nombre / Razón Social' o cualquier variante de nombre/cliente
+    key_cliente = next((k for k in keys if 'nombre' in k.lower() or 'razón' in k.lower() or 'razon' in k.lower() or k.lower() == 'cliente'), None)
+    key_zona = next((k for k in keys if 'zona' in k.lower() or 'reparto' in k.lower()), None)
     
-    nom = str(row.get(key_cliente, '')).strip()
-    zon = str(row.get(key_zona, '')).strip().upper()  # Forzamos mayúsculas (P o C)
-    if nom:
-        mapping_zonas[nom] = zon
+    if key_cliente and key_zona:
+        nom = str(row.get(key_cliente, '')).strip()
+        zon = str(row.get(key_zona, '')).strip().upper()  # Forzamos mayúsculas (P o C)
+        if nom:
+            mapping_zonas[nom] = zon
 
 # --- PANTALLA 1: SELECCIÓN DE REPARTO (ZONA P o C) ---
 if st.session_state.reparto is None:
     st.title("🍞 Sistema de Reparto")
     st.subheader("Seleccioná la zona de salida")
     
-    # Damos a escoger estrictamente entre las dos salidas indicadas: P y C
     reparto_elegido = st.selectbox("Salida / Reparto:", ["P", "C"])
     
     if st.button("Iniciar Reparto", type="primary", use_container_width=True):
@@ -130,7 +130,6 @@ else:
     if st.button(f"⬅️ Cambiar Zona (Saliendo de Reparto {st.session_state.reparto})", use_container_width=True):
         st.session_state.reparto = None
         st.session_state.lista_filtrada = []
-        # Al salir limpiamos la memoria para forzar recarga fresca la próxima vez
         if "data_clientes" in st.session_state: del st.session_state.data_clientes
         if "data_control" in st.session_state: del st.session_state.data_control
         st.rerun()
@@ -214,18 +213,17 @@ else:
     if st.button("🚚 CARGAR PAGO Y CONTINUAR", use_container_width=True, type="primary"):
         try:
             with st.spinner("Guardando pago en Google Sheets..."):
-                # Buscamos al cliente en la columna B (Cliente) de Control-Diario
+                # Rastreamos al cliente en la columna B de Control-Diario
                 celda_cliente = control_hoja.find(nombre_cliente, in_column=2)
                 
                 if celda_cliente:
                     fila = celda_cliente.row
                     columna_pagos = 12  # Columna L (Pagos)
                     
-                    # Impactamos el valor en la celda correspondiente
+                    # Impactamos en la celda
                     control_hoja.update_cell(fila, columna_pagos, monto_float)
                     st.toast(f"✅ ¡Pago de ${monto_float:.2f} guardado para {nombre_cliente}!", icon="💰")
                     
-                    # Actualizamos el estado interno de las listas para mantener consistencia
                     st.session_state.lista_filtrada[idx]["Pagos"] = monto_float
                     for r in st.session_state.data_control:
                         if str(r.get("Cliente")).strip() == nombre_cliente:
