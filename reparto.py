@@ -9,24 +9,44 @@ st.set_page_config(page_title="Reparto Panadería", page_icon="🍞", layout="ce
 # Estilos visuales para la interfaz
 st.markdown("""
 <style>
-.caja-saldos {
-    background-color: #F3F4F6;
-    padding: 15px;
-    border-radius: 12px;
-    text-align: center;
-    font-size: 20px !important;
-    margin-bottom: 15px;
-    border: 1px solid #E5E7EB;
-}
-.caja-deuda {
-    background-color: #FEF2F2;
-    padding: 12px;
-    border-radius: 12px;
-    text-align: center;
-    font-size: 18px !important;
-    margin-bottom: 15px;
-    border: 1px solid #FCA5A5;
-}
+    /* Ajustes generales */
+    .stApp { max-width: 600px; margin: 0 auto; }
+    
+    /* Botones más grandes para dedos */
+    .stButton > button {
+        height: 60px !important;
+        font-size: 18px !important;
+        font-weight: bold;
+    }
+    
+    /* Cajas con fuentes responsivas */
+    .caja-saldos {
+        background-color: #F3F4F6;
+        padding: 15px;
+        border-radius: 12px;
+        text-align: center;
+        font-size: 1.5rem !important; /* Tamaño adaptable */
+        margin-bottom: 15px;
+        border: 1px solid #E5E7EB;
+    }
+    .caja-deuda {
+        background-color: #FEF2F2;
+        padding: 12px;
+        border-radius: 12px;
+        text-align: center;
+        font-size: 1.2rem !important; /* Tamaño adaptable */
+        margin-bottom: 15px;
+        border: 1px solid #FCA5A5;
+    }
+    
+    /* Ajustes específicos para móviles */
+    @media only screen and (max-width: 600px) {
+        .stButton > button {
+            height: 55px !important;
+            padding: 0 !important;
+        }
+        h1 { font-size: 24px !important; }
+    }
 </style>
 """, unsafe_allow_html=True)
 
