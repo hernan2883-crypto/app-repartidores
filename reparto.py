@@ -12,6 +12,52 @@ st.markdown("""
     /* Ajustes generales */
     .stApp { max-width: 600px; margin: 0 auto; }
     
+    /* Forzar que las columnas de los números NO se apilen nunca */
+    [data-testid="column"] {
+        width: calc(33.33% - 1rem) !important;
+        flex: 1 1 calc(33.33% - 1rem) !important;
+        min-width: 0 !important;
+    }
+
+    /* Asegurar que el contenedor de las columnas sea una fila */
+    [data-testid="stHorizontalBlock"] {
+        display: flex !important;
+        flex-direction: row !important;
+        gap: 5px !important;
+    }
+    
+    /* Botones más grandes para dedos */
+    .stButton > button {
+        height: 50px !important;
+        width: 100% !important;
+        font-size: 16px !important;
+        font-weight: bold;
+        padding: 0 !important;
+    }
+    
+    /* Cajas con fuentes responsivas */
+    .caja-saldos {
+        background-color: #F3F4F6;
+        padding: 10px;
+        border-radius: 12px;
+        text-align: center;
+        font-size: 1.2rem !important;
+        margin-bottom: 10px;
+        border: 1px solid #E5E7EB;
+    }
+    .caja-deuda {
+        background-color: #FEF2F2;
+        padding: 10px;
+        border-radius: 12px;
+        text-align: center;
+        font-size: 1.1rem !important;
+        margin-bottom: 10px;
+        border: 1px solid #FCA5A5;
+    }
+
+    /* Ajustes generales */
+    .stApp { max-width: 600px; margin: 0 auto; }
+    
     /* Botones más grandes para dedos */
     .stButton > button {
         height: 60px !important;
