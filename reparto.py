@@ -1,152 +1,278 @@
 import streamlit as st
-import gspread
-from google.oauth2.service_account import Credentials
 import pandas as pd
+import gspread
+import datetime
+import json  # <-- Librería necesaria para leer tu clave en limpio
+import streamlit.components.v1 as components
 
-# 1. CONFIGURACIÓN DE PÁGINA Y CORRECCIÓN VISUAL (CSS)
-st.set_page_config(page_title="Reparto Panadería", layout="centered")
+# --- DETECCIÓN AUTOMÁTICA DEL DÍA REAL ---
+dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+dia_actual = dias_semana[datetime.datetime.now().weekday()]
 
-# Forzar por CSS que todo texto que escribas en los inputs sea blanco legible
+st.set_page_config(page_title="Reparto Pan", page_icon="🍞", layout="centered")
+
+# --- CONEXIÓN A GOOGLE SHEETS ---
+@st.cache_resource
+def conectar_google_sheets():
+    # Desempaqueta el texto plano del secreto y lo convierte en el diccionario que necesita Google
+    credenciales = json.loads(st.secrets["gcp_json_puro"])
+    gc = gspread.service_account_from_dict(credenciales)
+    
+    # Abrimos la planilla directamente por su ID único para evitar errores de nombre
+    sh = gc.open_by_key("10s3sTda68B_RAebXc91Ttl3Oa2Yy88EJ3psJUeJexcM")
+    return sh
+
+try:
+    sh = conectar_google_sheets()
+except Exception as e:
+    st.error(f"Error de conexión con Google Sheets: {e}")
+    st.stop()
+
+# --- JAVASCRIPT: SELECCIÓN AUTOMÁTICA DE TEXTO AL TOCAR UN INPUT ---
+components.html(f"""
+<script>
+const doc = window.parent.document;
+if (!doc._globalFocusHandler) {{
+    doc.addEventListener('focusin', (e) => {{
+        if (e.target.tagName === 'INPUT') {{
+            setTimeout(() => {{ e.target.select(); }}, 50);
+        }}
+    }});
+    doc._globalFocusHandler = true;
+}}
+</script>
+""", height=0)
+
+# --- CSS: RESALTE DE CONTRASTE Y ANTI-TRADUCCIÓN ---
 st.markdown("""
     <style>
-    input {
-        color: #FFFFFF !important;
-        -webkit-text-fill-color: #FFFFFF !important;
-        background-color: #1E1E1E !important;
+    .block-container { padding: 10px !important; }
+    
+    /* 1. INPUT GIGANTE: Monto a Cobrar */
+    div[data-testid="stNumberInput"]:has(input[aria-label="Monto"]) div[data-baseweb="input"] {
+        background-color: #ffffff !important;
+        border: 4px solid #27AE60 !important;
+        border-radius: 15px !important;
+        height: 90px !important;
     }
-    .stNumberInput div div input {
-        color: #FFFFFF !important;
+    div[data-testid="stNumberInput"]:has(input[aria-label="Monto"]) input {
+        font-size: 45px !important;
+        font-weight: 900 !important;
+        text-align: center !important;
+        color: #000000 !important;
+        -webkit-text-fill-color: #000000 !important;
     }
-    .stApp {
-        background-color: #0E1117;
-        color: #FFFFFF;
+    
+    /* 2. CUADRITOS CHICOS: Fondo oscuro y texto BLANCO */
+    div[data-testid="stNumberInput"]:not(:has(input[aria-label="Monto"])) div[data-baseweb="input"] {
+        background-color: #34495E !important;
+        border: 2px solid #2C3E50 !important;
+        border-radius: 8px !important;
+        height: 45px !important;
     }
-    label {
-        color: #FFFFFF !important;
+    div[data-testid="stNumberInput"]:not(:has(input[aria-label="Monto"])) input {
+        font-size: 16px !important;
+        font-weight: 800 !important;
+        text-align: center !important;
+        color: #ffffff !important;
+        -webkit-text-fill-color: #ffffff !important;
+        padding: 0px !important;
     }
+    div[data-testid="stNumberInput"]:not(:has(input[aria-label="Monto"])) input:focus {
+        background-color: #34495E !important;
+        color: #ffffff !important;
+        -webkit-text-fill-color: #ffffff !important;
+    }
+    button[aria-label="Step Up"], button[aria-label="Step Down"] { display: none !important; }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("Sistema de Reparto - Control de Carga")
-
-# 2. CONEXIÓN CON GOOGLE SHEETS
-try:
-    gcp_json_puro = st.secrets["gcp_service_account"]
-    scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    credentials = Credentials.from_service_account_info(gcp_json_puro, scopes=scope)
-    gc = gspread.authorize(credentials)
+# --- LÓGICA DE GUARDADO DE MONTO ---
+def guardar_y_avanzar():
+    idx = st.session_state.cliente_actual_idx
+    cliente_actual = st.session_state.clientes_reparto.iloc[idx]
+    clave_input = f"input_{cliente_actual['ID_Cliente']}"
     
-    # ID de tu planilla maestra
-    SPREADSHEET_ID = "10s3sTda68B_RAebXc91Ttl3Oa2Yy8EJ3psJUeJexcM"
-    sh = gc.open_by_key(SPREADSHEET_ID)
-except Exception as e:
-    st.error(f"Error de autenticación o conexión: {e}")
-    st.stop()
-
-# 3. LECTURA DE DATOS E INTEGRACIÓN DE LA HOJA "CONTROL-DIARIO"
-@st.cache_data(ttl=30)
-def cargar_todo():
-    # Cargar base de clientes principal
-    ws_clientes = sh.worksheet("Clientes")
-    df_clientes = pd.DataFrame(ws_clientes.get_all_records())
+    monto = st.session_state.get(clave_input)
     
-    # Cargar deudas actualizadas desde la hoja "Control-Diario" (Columna C)
-    deudas_control = {}
-    try:
-        ws_control = sh.worksheet("Control-Diario")
-        filas_control = ws_control.get_all_values()
-        
-        # Recorremos el Control Diario mapeando los nombres y su columna C (Índice 2)
-        for fila in filas_control:
-            if len(fila) > 2 and fila[0]: # Si tiene un nombre en la primera columna
-                nombre_key = str(fila[0]).strip().upper()
-                try:
-                    # Extraer el valor de la columna C limpiando comas
-                    valor_deuda = float(str(fila[2]).replace(",", ".")) if fila[2] else 0.0
-                    deudas_control[nombre_key] = valor_deuda
-                except:
-                    deudas_control[nombre_key] = 0.0
-    except Exception as e:
-        st.warning(f"Aviso: No se pudo acoplar 'Control-Diario' ({e}). Se usará la deuda base.")
-        
-    return df_clientes, deudas_control
-
-df_c, deudas_dinamicas = cargar_todo()
-
-# 4. NORMALIZACIÓN SEGURA DE COLUMNAS (Solución al KeyError)
-clientes_procesados = []
-
-for idx, cliente in df_c.iterrows():
-    # Pasamos todas las claves a mayúsculas y limpiamos espacios para evitar errores de tipeo en las columnas
-    c_limpio = {str(k).strip().upper(): v for k, v in cliente.items()}
-    
-    nombre_cliente = str(c_limpio.get('CLIENTE', c_limpio.get('NOMBRE', ''))).strip().upper()
-    if not nombre_cliente:
-        continue
-        
-    # Búsqueda tolerante a fallos para 'Cant_Minones' o cualquier variante
-    pan = c_limpio.get('PAN', 0)
-    minon = c_limpio.get('MIÑON', c_limpio.get('MIÑÓN', c_limpio.get('CANT_MINONES', c_limpio.get('MINON', 0))))
-    galletas = c_limpio.get('GALLETAS', c_limpio.get('GALLETA', 0))
-    figaza = c_limpio.get('FIGAZA', 0)
-    negritos = c_limpio.get('NEGRITOS', 0)
-    facturas = c_limpio.get('FACTURAS', 0)
-    
-    # Asignar deuda desde Control-Diario prioritariamente, si no se encuentra se usa la de Clientes
-    deuda_final = deudas_dinamicas.get(nombre_cliente, c_limpio.get('DEUDA', c_limpio.get('DEUDA ANTERIOR', 0)))
-    try:
-        deuda_final = float(str(deuda_final).replace(",", "."))
-    except:
-        deuda_final = 0.0
-
-    clientes_procesados.append({
-        'fila_excel': idx + 2,  # Guardamos la fila real (+2 por encabezado del excel)
-        'nombre': nombre_cliente,
-        'pan': pan,
-        'minon': minon,
-        'galletas': galletas,
-        'figaza': figaza,
-        'negritos': negritos,
-        'facturas': facturas,
-        'deuda': deuda_final
-    })
-
-# 5. INTERFAZ GRÁFICA DE STREAMLIT
-if clientes_procesados:
-    lista_nombres = [c['nombre'] for c in clientes_procesados]
-    cliente_sel = st.selectbox("Seleccioná el cliente para cargar reparto:", lista_nombres)
-    
-    # Traer datos del cliente elegido
-    datos_sel = next(item for item in clientes_procesados if item['nombre'] == cliente_sel)
-    
-    st.markdown(f"### Pedido Fijo de: **{datos_sel['nombre']}**")
-    
-    # Formulario con inputs en dos columnas optimizadas
-    col1, col2 = st.columns(2)
-    with col1:
-        v_pan = st.number_input("Pan (kg):", value=float(datos_sel['pan']), step=1.0)
-        v_minon = st.number_input("Miñón (kg):", value=float(datos_sel['minon']), step=1.0)
-        v_galletas = st.number_input("Galletas (kg):", value=float(datos_sel['galletas']), step=1.0)
-        
-    with col2:
-        v_figaza = st.number_input("Figaza (kg):", value=float(datos_sel['figaza']), step=1.0)
-        v_negritos = st.number_input("Negritos (kg):", value=float(datos_sel['negritos']), step=1.0)
-        v_facturas = st.number_input("Facturas (doc):", value=float(datos_sel['facturas']), step=1.0)
-        
-    # Muestra de la deuda vinculada dinámicamente de Control-Diario (Columna C)
-    st.metric(label="Deuda Traída de 'Control-Diario' (Columna C):", value=f"${datos_sel['deuda']:.2f}")
-    
-    if st.button("Guardar Cambios"):
+    if monto is not None and monto > 0:
         try:
-            ws_clientes = sh.worksheet("Clientes")
-            fila_objetivo = datos_sel['fila_excel']
+            ws = sh.worksheet("Control-Diario")
+            fila_excel = int(cliente_actual['excel_row'])
             
-            # Ejemplo de guardado de retorno dinámico (ajustar índices de columna si es necesario)
-            # ws_clientes.update_cell(fila_objetivo, 4, v_pan)
+            # Guardar Monto en la columna 12 (Pagos) de Google Sheets
+            ws.update_cell(fila_excel, 12, monto)
             
-            st.success(f"Datos de {datos_sel['nombre']} guardados con éxito. ¡Ya podés refrescar!")
-            st.cache_data.clear()
+            st.toast(f"✅ Guardado online: ${monto} - {cliente_actual['Cliente']}", icon="🍞")
+            st.session_state.cliente_actual_idx += 1
+            st.session_state.dia_semana_reparto = dia_actual
         except Exception as e:
-            st.error(f"Error al escribir en la planilla: {e}")
+            st.error(f"Error al guardar en Google Sheets: {e}")
+
+# --- LÓGICA DE GUARDADO DE CANTIDADES EN LA HOJA DEL DÍA ---
+def guardar_cantidad_dia(id_cliente, col_idx, key_name):
+    val = st.session_state.get(key_name)
+    dia = st.session_state.dia_semana_reparto
+    if val is not None:
+        try:
+            ws = sh.worksheet(dia)
+            celda = ws.find(str(id_cliente), in_column=1)
+            
+            if celda:
+                ws.update_cell(celda.row, col_idx, val)
+                st.toast(f"💾 Modificado en {dia}: {val}", icon="📦")
+            else:
+                st.error(f"No se encontró el ID {id_cliente} en la hoja {dia}")
+        except Exception as e:
+            st.error(f"Error al actualizar cantidad en la hoja {dia}: {e}")
+
+# --- INICIALIZACIÓN ---
+if 'cliente_actual_idx' not in st.session_state: st.session_state.cliente_actual_idx = 0
+if 'reparto_seleccionado' not in st.session_state: st.session_state.reparto_seleccionado = None
+if 'dia_semana_reparto' not in st.session_state: st.session_state.dia_semana_reparto = dia_actual
+
+# --- NAVEGACIÓN ---
+if st.session_state.reparto_seleccionado is None:
+    st.title("🍞 Selección de Reparto")
+    if st.button("👨‍🍳 REPARTO P (Papá)", use_container_width=True): 
+        st.session_state.reparto_seleccionado = "P"
+        st.session_state.cliente_actual_idx = 0
+        st.session_state.dia_semana_reparto = dia_actual
+        if 'clientes_reparto' in st.session_state: del st.session_state.clientes_reparto
+        st.rerun()
+    if st.button("🚚 REPARTO C (Chelo)", use_container_width=True): 
+        st.session_state.reparto_seleccionado = "C"
+        st.session_state.cliente_actual_idx = 0
+        st.session_state.dia_semana_reparto = dia_actual
+        if 'clientes_reparto' in st.session_state: del st.session_state.clientes_reparto
+        st.rerun()
 else:
-    st.error("No se encontraron registros de clientes válidos en la planilla.")
+    if 'clientes_reparto' not in st.session_state:
+        with st.spinner("Cargando datos desde Google Sheets..."):
+            matriz_control = sh.worksheet("Control-Diario").get_all_values()
+            df = pd.DataFrame(matriz_control[1:], columns=matriz_control[0])
+            df['excel_row'] = df.index + 2
+            
+            matriz_clientes = sh.worksheet("Clientes").get_all_values()
+            df_cli = pd.DataFrame(matriz_clientes[1:], columns=matriz_clientes[0])
+            
+            columnas_num = ['salida', 'Deuda Anterior', 'Cant_Pan', 'Cant_Minones', 'Cant_Galletas', 'Cant_Figaza', 'Cant_Negritos', 'Cant_Facturas']
+            for c in columnas_num:
+                if c in df.columns:
+                    df[c] = pd.to_numeric(df[c].str.replace(',', '.'), errors='coerce').fillna(0)
+
+            st.session_state.clientes_reparto = df.merge(df_cli[['ID_Cliente', 'Zona / Reparto']], on='ID_Cliente').query(f"`Zona / Reparto` == '{st.session_state.reparto_seleccionado}'").sort_values('salida').reset_index(drop=True)
+
+    idx = st.session_state.cliente_actual_idx
+    total_clientes = len(st.session_state.clientes_reparto)
+
+    if idx >= total_clientes:
+        st.balloons()
+        st.success("¡Reparto terminado!")
+        if st.button("⬅️ Revisar Último Cliente", use_container_width=True):
+            st.session_state.cliente_actual_idx = total_clientes - 1
+            st.session_state.dia_semana_reparto = dia_actual
+            st.rerun()
+        if st.button("🔄 Volver al Menú Principal", use_container_width=True): 
+            st.session_state.reparto_seleccionado = None
+            st.session_state.cliente_actual_idx = 0
+            st.session_state.dia_semana_reparto = dia_actual
+            if 'clientes_reparto' in st.session_state: del st.session_state.clientes_reparto
+            st.rerun()
+    else:
+        cliente = st.session_state.clientes_reparto.iloc[idx]
+        
+        col_menu, col_orden = st.columns([1, 3])
+        with col_menu:
+            if st.button("🏠 Menú", use_container_width=True):
+                st.session_state.reparto_seleccionado = None
+                st.session_state.dia_semana_reparto = dia_actual
+                if 'clientes_reparto' in st.session_state: del st.session_state.clientes_reparto
+                st.rerun()
+        with col_orden:
+            st.markdown(f"<p style='text-align:right; color:#7F8C8D; font-weight:bold; margin-top:5px;'>Reparto {st.session_state.reparto_seleccionado} | Orden: #{int(cliente['salida'])}</p>", unsafe_allow_html=True)
+        
+        progreso = idx / total_clientes
+        st.progress(progreso)
+        st.markdown(f"<p style='text-align:center; font-size:12px; color:#7F8C8D; margin-top:-10px;'>Cliente {idx + 1} de {total_clientes}</p>", unsafe_allow_html=True)
+        
+        st.markdown(f"""
+        <div style="background-color:#F8F9F9; padding:12px; border-radius:15px; border-left: 8px solid #E67E22; margin-bottom:10px;">
+            <h2 style="margin:0; color:#2C3E50; font-size:24px;">{cliente['Cliente']}</h2>
+            <p style="margin:2px 0 0 0; color:#95A5A6; font-size:13px;">ID: {cliente['ID_Cliente']}</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        deuda = cliente['Deuda Anterior']
+        st.markdown(f"<div style='text-align:center; margin-bottom:10px;'><span style='font-size:14px; color:#7F8C8D;'>⚠️ DEUDA: </span><span style='color:#C0392B; font-size:20px; font-weight:900;'>${deuda:,.2f}</span></div>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align:center; font-size:16px; font-weight:bold; color:#27AE60; margin-bottom:2px;'>MONTO A COBRAR:</p>", unsafe_allow_html=True)
+        
+        st.number_input(
+            "Monto", 
+            key=f"input_{cliente['ID_Cliente']}", 
+            value=None, 
+            placeholder="", 
+            label_visibility="collapsed",
+            on_change=guardar_y_avanzar
+        )
+        
+        col_ant, col_sig = st.columns(2)
+        with col_ant:
+            if idx > 0:
+                if st.button("⬅️ Anterior", use_container_width=True):
+                    st.session_state.cliente_actual_idx -= 1
+                    st.session_state.dia_semana_reparto = dia_actual
+                    st.rerun()
+            else:
+                st.button("⬅️ Inicio", disabled=True, use_container_width=True)
+                
+        with col_sig:
+            if st.button("Saltar ⏭️", use_container_width=True):
+                st.session_state.cliente_actual_idx += 1
+                st.session_state.dia_semana_reparto = dia_actual
+                st.rerun()
+                
+        st.markdown("<hr style='margin:15px 0;'>", unsafe_allow_html=True)
+        
+        st.markdown("<p style='font-size:14px; font-weight:bold; color:#34495E; margin-bottom:2px;'>📆 Día del Reparto:</p>", unsafe_allow_html=True)
+        st.selectbox(
+            "Día Selector",
+            ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"],
+            key="dia_semana_reparto",
+            label_visibility="collapsed"
+        )
+        
+        st.markdown("<p style='font-size:14px; font-weight:bold; color:#34495E; margin-top:10px; margin-bottom:5px;'>📦 Cantidades:</p>", unsafe_allow_html=True)
+        
+        p_pan = float(cliente['Cant_Pan'])
+        p_min = float(cliente['Cant_Minones'])
+        p_gal = float(cliente['Cant_Galletas'])
+        p_fig = float(cliente['Cant_Figaza'])
+        p_neg = float(cliente['Cant_Negritos'])
+        p_fac = int(cliente['Cant_Facturas'])
+        
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        
+        with col1:
+            st.markdown("<p class='notranslate' translate='no' style='text-align:center; font-size:11px; font-weight:bold; margin-bottom:2px; color:#34495E;'>Pan</p>", unsafe_allow_html=True)
+            st.number_input("Pan", key=f"pan_{cliente['ID_Cliente']}", value=p_pan, format="%.1f", label_visibility="collapsed", on_change=guardar_cantidad_dia, args=(cliente['ID_Cliente'], 3, f"pan_{cliente['ID_Cliente']}"))
+            
+        with col2:
+            st.markdown("<p class='notranslate' translate='no' style='text-align:center; font-size:11px; font-weight:bold; margin-bottom:2px; color:#34495E;'>Miñones</p>", unsafe_allow_html=True)
+            st.number_input("Miñones", key=f"minones_{cliente['ID_Cliente']}", value=p_min, format="%.1f", label_visibility="collapsed", on_change=guardar_cantidad_dia, args=(cliente['ID_Cliente'], 4, f"minones_{cliente['ID_Cliente']}"))
+            
+        with col3:
+            st.markdown("<p class='notranslate' translate='no' style='text-align:center; font-size:11px; font-weight:bold; margin-bottom:2px; color:#34495E;'>Galletas</p>", unsafe_allow_html=True)
+            st.number_input("Galletas", key=f"galletas_{cliente['ID_Cliente']}", value=p_gal, format="%.1f", label_visibility="collapsed", on_change=guardar_cantidad_dia, args=(cliente['ID_Cliente'], 5, f"galletas_{cliente['ID_Cliente']}"))
+            
+        with col4:
+            st.markdown("<p class='notranslate' translate='no' style='text-align:center; font-size:11px; font-weight:bold; margin-bottom:2px; color:#34495E;'>Figazas</p>", unsafe_allow_html=True)
+            st.number_input("Figazas", key=f"figaza_{cliente['ID_Cliente']}", value=p_fig, format="%.1f", label_visibility="collapsed", on_change=guardar_cantidad_dia, args=(cliente['ID_Cliente'], 6, f"figaza_{cliente['ID_Cliente']}"))
+            
+        with col5:
+            st.markdown("<p class='notranslate' translate='no' style='text-align:center; font-size:11px; font-weight:bold; margin-bottom:2px; color:#34495E;'>Negritos</p>", unsafe_allow_html=True)
+            st.number_input("Negritos", key=f"negrito_{cliente['ID_Cliente']}", value=p_neg, format="%.1f", label_visibility="collapsed", on_change=guardar_cantidad_dia, args=(cliente['ID_Cliente'], 7, f"negrito_{cliente['ID_Cliente']}"))
+            
+        with col6:
+            st.markdown("<p class='notranslate' translate='no' style='text-align:center; font-size:11px; font-weight:bold; margin-bottom:2px; color:#34495E;'>Facturas</p>", unsafe_allow_html=True)
+            st.number_input("Facturas", key=f"facturas_{cliente['ID_Cliente']}", value=p_fac, step=1, label_visibility="collapsed", on_change=guardar_cantidad_dia, args=(cliente['ID_Cliente'], 8, f"facturas_{cliente['ID_Cliente']}"))
