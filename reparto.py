@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import gspread
 import datetime
+import json  # <-- Nueva librería para leer tu clave directo
 import streamlit.components.v1 as components
 
 # --- DETECCIÓN AUTOMÁTICA DEL DÍA REAL ---
@@ -13,9 +14,9 @@ st.set_page_config(page_title="Reparto Pan", page_icon="🍞", layout="centered"
 # --- CONEXIÓN A GOOGLE SHEETS ---
 @st.cache_resource
 def conectar_google_sheets():
-    # Se autentica usando los Secretos de Streamlit Cloud
-    gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
-    # Abre la planilla por su nombre exacto
+    # Lee el texto puro del secreto y lo transforma en el diccionario que necesita Google
+    credenciales = json.loads(st.secrets["gcp_json_puro"])
+    gc = gspread.service_account_from_dict(credenciales)
     sh = gc.open("planilla maestra panadería")
     return sh
 
@@ -67,7 +68,7 @@ st.markdown("""
         border-radius: 8px !important;
         height: 45px !important;
     }
-    div[data-testid="stNumberInput"]:not(:has(input[aria-label="Monto"]) input {
+    div[data-testid="stNumberInput"]:not(:has(input[aria-label="Monto"])) input {
         font-size: 16px !important;
         font-weight: 800 !important;
         text-align: center !important;
@@ -84,7 +85,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- LÓGICA DE GUARDADO DE MONTO (Control_Diario en Google Sheets) ---
+# --- LÓGICA DE GUARDADO DE MONTO (Control-Diario con guion medio) ---
 def guardar_y_avanzar():
     idx = st.session_state.cliente_actual_idx
     cliente_actual = st.session_state.clientes_reparto.iloc[idx]
@@ -94,7 +95,7 @@ def guardar_y_avanzar():
     
     if monto is not None and monto > 0:
         try:
-            ws = sh.worksheet("Control_Diario")
+            ws = sh.worksheet("Control-Diario")
             fila_excel = int(cliente_actual['excel_row'])
             
             # Guardar Monto en la columna 12 (Pagos) de Google Sheets
@@ -113,7 +114,6 @@ def guardar_cantidad_dia(id_cliente, col_idx, key_name):
     if val is not None:
         try:
             ws = sh.worksheet(dia)
-            # Buscar el ID_Cliente en la columna 1 de la hoja del día
             celda = ws.find(str(id_cliente), in_column=1)
             
             if celda:
@@ -147,8 +147,8 @@ if st.session_state.reparto_seleccionado is None:
 else:
     if 'clientes_reparto' not in st.session_state:
         with st.spinner("Cargando datos desde Google Sheets..."):
-            # Leer Control_Diario
-            matriz_control = sh.worksheet("Control_Diario").get_all_values()
+            # Leer Control-Diario (Pestaña real de tu Sheets)
+            matriz_control = sh.worksheet("Control-Diario").get_all_values()
             df = pd.DataFrame(matriz_control[1:], columns=matriz_control[0])
             df['excel_row'] = df.index + 2
             
@@ -172,7 +172,7 @@ else:
         st.success("¡Reparto terminado!")
         if st.button("⬅️ Revisar Último Cliente", use_container_width=True):
             st.session_state.cliente_actual_idx = total_clientes - 1
-            st.session_value.dia_semana_reparto = dia_actual
+            st.session_state.dia_semana_reparto = dia_actual
             st.rerun()
         if st.button("🔄 Volver al Menú Principal", use_container_width=True): 
             st.session_state.reparto_seleccionado = None
