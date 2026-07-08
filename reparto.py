@@ -19,7 +19,7 @@ def conectar_google_sheets():
     gc = gspread.service_account_from_dict(credenciales)
     
     # Abrimos la planilla directamente por su ID único para evitar errores de nombre
-    sh = gc.open_by_key("10s3sTda68B_RAebXc91Ttl3Oa2YyY8EJ3psJUeJexcM")
+    sh = gc.open_by_key("10s3sTda68B_RAebXc91Ttl3Oa2Yy88EJ3psJUeJexcM")
     return sh
 
 try:
