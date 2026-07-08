@@ -245,7 +245,7 @@ else:
         st.markdown("<p style='font-size:14px; font-weight:bold; color:#34495E; margin-top:10px; margin-bottom:5px;'>📦 Cantidades:</p>", unsafe_allow_html=True)
         
         p_pan = float(cliente['Cant_Pan'])
-        p_min = float(cliente['Cant_Minones'])
+        p_min = float(cliente['Cant_Miñon'])
         p_gal = float(cliente['Cant_Galletas'])
         p_fig = float(cliente['Cant_Figaza'])
         p_neg = float(cliente['Cant_Negritos'])
