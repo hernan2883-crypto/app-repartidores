@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import gspread
 import datetime
-import json  # <-- Nueva librería para leer tu clave directo
+import json  # <-- Librería necesaria para leer tu clave en limpio
 import streamlit.components.v1 as components
 
 # --- DETECCIÓN AUTOMÁTICA DEL DÍA REAL ---
@@ -14,10 +14,12 @@ st.set_page_config(page_title="Reparto Pan", page_icon="🍞", layout="centered"
 # --- CONEXIÓN A GOOGLE SHEETS ---
 @st.cache_resource
 def conectar_google_sheets():
-    # Lee el texto puro del secreto y lo transforma en el diccionario que necesita Google
+    # Desempaqueta el texto plano del secreto y lo convierte en el diccionario que necesita Google
     credenciales = json.loads(st.secrets["gcp_json_puro"])
     gc = gspread.service_account_from_dict(credenciales)
-    sh = gc.open("planilla maestra panadería")
+    
+    # Abrimos la planilla directamente por su ID único para evitar errores de nombre
+    sh = gc.open_by_key("10s3sTda68B_RAebXc91Ttl3Oa2YyY8EJ3psJUeJexcM")
     return sh
 
 try:
@@ -85,7 +87,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- LÓGICA DE GUARDADO DE MONTO (Control-Diario con guion medio) ---
+# --- LÓGICA DE GUARDADO DE MONTO ---
 def guardar_y_avanzar():
     idx = st.session_state.cliente_actual_idx
     cliente_actual = st.session_state.clientes_reparto.iloc[idx]
@@ -147,16 +149,13 @@ if st.session_state.reparto_seleccionado is None:
 else:
     if 'clientes_reparto' not in st.session_state:
         with st.spinner("Cargando datos desde Google Sheets..."):
-            # Leer Control-Diario (Pestaña real de tu Sheets)
             matriz_control = sh.worksheet("Control-Diario").get_all_values()
             df = pd.DataFrame(matriz_control[1:], columns=matriz_control[0])
             df['excel_row'] = df.index + 2
             
-            # Leer Clientes
             matriz_clientes = sh.worksheet("Clientes").get_all_values()
             df_cli = pd.DataFrame(matriz_clientes[1:], columns=matriz_clientes[0])
             
-            # Convertir columnas numéricas necesarias para evitar errores de texto
             columnas_num = ['salida', 'Deuda Anterior', 'Cant_Pan', 'Cant_Minones', 'Cant_Galletas', 'Cant_Figaza', 'Cant_Negritos', 'Cant_Facturas']
             for c in columnas_num:
                 if c in df.columns:
