@@ -18,7 +18,7 @@ def conectar_google_sheets():
     credenciales = json.loads(st.secrets["gcp_json_puro"])
     gc = gspread.service_account_from_dict(credenciales)
     
-    # Abrimos la planilla directamente por su ID único para evitar errores de nombre
+    # ID de tu planilla corregida con el '88'
     sh = gc.open_by_key("10s3sTda68B_RAebXc91Ttl3Oa2Yy88EJ3psJUeJexcM")
     return sh
 
@@ -48,10 +48,10 @@ st.markdown("""
     <style>
     .block-container { padding: 10px !important; }
     
-    /* 1. INPUT GIGANTE: Monto a Cobrar */
+    /* 1. INPUT GIGANTE: Monto a Cobrar (TEXTO BLANCO FORZADO) */
     div[data-testid="stNumberInput"]:has(input[aria-label="Monto"]) div[data-baseweb="input"] {
-        background-color: #ffffff !important;
-        border: 4px solid #27AE60 !important;
+        background-color: #27AE60 !important; /* Fondo verde para resaltar el texto blanco */
+        border: 4px solid #219653 !important;
         border-radius: 15px !important;
         height: 90px !important;
     }
@@ -59,8 +59,13 @@ st.markdown("""
         font-size: 45px !important;
         font-weight: 900 !important;
         text-align: center !important;
-        color: #000000 !important;
-        -webkit-text-fill-color: #000000 !important;
+        color: #ffffff !important; /* <--- TEXTO BLANCO AL ESCRIBIR */
+        -webkit-text-fill-color: #ffffff !important; /* <--- FUERZA TEXTO BLANCO EN CELULARES */
+    }
+    div[data-testid="stNumberInput"]:has(input[aria-label="Monto"]) input:focus {
+        background-color: #27AE60 !important;
+        color: #ffffff !important;
+        -webkit-text-fill-color: #ffffff !important;
     }
     
     /* 2. CUADRITOS CHICOS: Fondo oscuro y texto BLANCO */
@@ -149,14 +154,16 @@ if st.session_state.reparto_seleccionado is None:
 else:
     if 'clientes_reparto' not in st.session_state:
         with st.spinner("Cargando datos desde Google Sheets..."):
-            matriz_control = sh.worksheet("Control-Diario").get_all_values()
+            ws_control = sh.worksheet("Control-Diario")
+            matriz_control = ws_control.get_all_values()
             df = pd.DataFrame(matriz_control[1:], columns=matriz_control[0])
             df['excel_row'] = df.index + 2
             
             matriz_clientes = sh.worksheet("Clientes").get_all_values()
             df_cli = pd.DataFrame(matriz_clientes[1:], columns=matriz_clientes[0])
             
-            columnas_num = ['salida', 'Deuda Anterior', 'Cant_Pan', 'Cant_Minones', 'Cant_Galletas', 'Cant_Figaza', 'Cant_Negritos', 'Cant_Facturas']
+            # Buscamos exactamente 'Cant_Miñon' con la Ñ
+            columnas_num = ['salida', 'Deuda Anterior', 'Cant_Pan', 'Cant_Miñon', 'Cant_Galletas', 'Cant_Figaza', 'Cant_Negritos', 'Cant_Facturas']
             for c in columnas_num:
                 if c in df.columns:
                     df[c] = pd.to_numeric(df[c].str.replace(',', '.'), errors='coerce').fillna(0)
@@ -203,7 +210,9 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+        # Deuda leída directamente sin consultas dinámicas adicionales que puedan fallar
         deuda = cliente['Deuda Anterior']
+
         st.markdown(f"<div style='text-align:center; margin-bottom:10px;'><span style='font-size:14px; color:#7F8C8D;'>⚠️ DEUDA: </span><span style='color:#C0392B; font-size:20px; font-weight:900;'>${deuda:,.2f}</span></div>", unsafe_allow_html=True)
         st.markdown("<p style='text-align:center; font-size:16px; font-weight:bold; color:#27AE60; margin-bottom:2px;'>MONTO A COBRAR:</p>", unsafe_allow_html=True)
         
@@ -245,6 +254,7 @@ else:
         st.markdown("<p style='font-size:14px; font-weight:bold; color:#34495E; margin-top:10px; margin-bottom:5px;'>📦 Cantidades:</p>", unsafe_allow_html=True)
         
         p_pan = float(cliente['Cant_Pan'])
+        # Lectura directa de Cant_Miñon sin rodeos
         p_min = float(cliente['Cant_Miñon'])
         p_gal = float(cliente['Cant_Galletas'])
         p_fig = float(cliente['Cant_Figaza'])
