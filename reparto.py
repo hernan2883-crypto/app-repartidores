@@ -14,11 +14,8 @@ st.set_page_config(page_title="Reparto Pan", page_icon="🍞", layout="centered"
 # --- CONEXIÓN A GOOGLE SHEETS ---
 @st.cache_resource
 def conectar_google_sheets():
-    # Desempaqueta el texto plano del secreto y lo convierte en el diccionario que necesita Google
     credenciales = json.loads(st.secrets["gcp_json_puro"])
     gc = gspread.service_account_from_dict(credenciales)
-    
-    # ID de tu planilla corregida con el '88'
     sh = gc.open_by_key("10s3sTda68B_RAebXc91Ttl3Oa2Yy88EJ3psJUeJexcM")
     return sh
 
@@ -50,7 +47,7 @@ st.markdown("""
     
     /* 1. INPUT GIGANTE: Monto a Cobrar (TEXTO BLANCO FORZADO) */
     div[data-testid="stNumberInput"]:has(input[aria-label="Monto"]) div[data-baseweb="input"] {
-        background-color: #27AE60 !important; /* Fondo verde para resaltar el texto blanco */
+        background-color: #27AE60 !important;
         border: 4px solid #219653 !important;
         border-radius: 15px !important;
         height: 90px !important;
@@ -59,8 +56,8 @@ st.markdown("""
         font-size: 45px !important;
         font-weight: 900 !important;
         text-align: center !important;
-        color: #ffffff !important; /* <--- TEXTO BLANCO AL ESCRIBIR */
-        -webkit-text-fill-color: #ffffff !important; /* <--- FUERZA TEXTO BLANCO EN CELULARES */
+        color: #ffffff !important;
+        -webkit-text-fill-color: #ffffff !important;
     }
     div[data-testid="stNumberInput"]:has(input[aria-label="Monto"]) input:focus {
         background-color: #27AE60 !important;
@@ -111,11 +108,10 @@ def guardar_y_avanzar():
             ws = sh.worksheet("Control-Diario")
             fila_excel = int(cliente_actual['excel_row'])
             
-            # Guardar Monto en la columna 12 (Pagos) de Google Sheets
+            # Guardamos el monto tal cual lo escribís (entero o con coma)
             ws.update_cell(fila_excel, 12, monto)
             
-            # --- CASILLERO SUMADOR ---
-            # Sumamos el pago ingresado al acumulador de la caja en efectivo
+            # Sumamos al acumulador en vivo
             st.session_state.total_efectivo_caja += float(monto)
             
             st.toast(f"✅ Guardado online: ${monto} - {cliente_actual['Cliente']}", icon="🍞")
@@ -167,10 +163,12 @@ else:
             matriz_clientes = sh.worksheet("Clientes").get_all_values()
             df_cli = pd.DataFrame(matriz_clientes[1:], columns=matriz_clientes[0])
             
-            # Agregamos 'Saldo Nuevo' (Columna M) al procesamiento numérico inicial
+            # Procesamiento de datos numéricos iniciales
             columnas_num = ['salida', 'Deuda Anterior', 'Saldo Nuevo', 'Cant_Pan', 'Cant_Miñon', 'Cant_Galletas', 'Cant_Figaza', 'Cant_Negritos', 'Cant_Facturas']
             for c in columnas_num:
                 if c in df.columns:
+                    # Reemplazamos puntos por nada si actúan como miles, o manejamos el texto limpio
+                    df[c] = df[c].astype(str).str.replace('$', '', regex=False).str.strip()
                     df[c] = pd.to_numeric(df[c].str.replace(',', '.'), errors='coerce').fillna(0)
 
             st.session_state.clientes_reparto = df.merge(df_cli[['ID_Cliente', 'Zona / Reparto']], on='ID_Cliente').query(f"`Zona / Reparto` == '{st.session_state.reparto_seleccionado}'").sort_values('salida').reset_index(drop=True)
@@ -182,7 +180,6 @@ else:
         st.balloons()
         st.success("¡Reparto terminado!")
         
-        # --- PANTALLA FINAL: SE MUESTRA EL TOTAL DE EFECTIVO QUE DEBE TENER ---
         st.markdown(f"""
         <div style="background-color:#FFF; padding:20px; border-radius:15px; border: 3px solid #27AE60; text-align:center; margin-top:15px; margin-bottom:15px;">
             <p style="margin:0; color:#2C3E50; font-size:18px; font-weight:bold;">💵 TOTAL EFECTIVO RECOLECTADO:</p>
@@ -198,7 +195,7 @@ else:
             st.session_state.reparto_seleccionado = None
             st.session_state.cliente_actual_idx = 0
             st.session_state.dia_semana_reparto = dia_actual
-            st.session_state.total_efectivo_caja = 0.0  # Se limpia para el próximo reparto
+            st.session_state.total_efectivo_caja = 0.0
             if 'clientes_reparto' in st.session_state: del st.session_state.clientes_reparto
             st.rerun()
     else:
@@ -225,16 +222,24 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
-        # --- LECTURA DIRECTA DE SALDO NUEVO DESDE COLUMNA M ---
-        saldo_nuevo = float(cliente.get('Saldo Nuevo', 0.0))
+        # --- CORRECCIÓN DE DECIMALES Y MULTIPLICADOR DE SALDO ---
+        valor_base = float(cliente.get('Saldo Nuevo', 0.0))
+        # Si el saldo quedó guardado como 66.3 cuando debería ser 66300, ajustamos la escala de miles.
+        if 0 < valor_base < 1000 and '.' in str(cliente.get('Saldo Nuevo', '')):
+            saldo_nuevo = valor_base * 1000
+        else:
+            saldo_nuevo = valor_base
 
         st.markdown(f"<div style='text-align:center; margin-bottom:10px;'><span style='font-size:14px; color:#7F8C8D;'>⚠️ SALDO NUEVO: </span><span style='color:#C0392B; font-size:20px; font-weight:900;'>${saldo_nuevo:,.2f}</span></div>", unsafe_allow_html=True)
         st.markdown("<p style='text-align:center; font-size:16px; font-weight:bold; color:#27AE60; margin-bottom:2px;'>MONTO A COBRAR:</p>", unsafe_allow_html=True)
         
+        # --- CAMBIO: PASADO A PASO ENTERO (Sin declarar decimales obligatorios al tipear) ---
         st.number_input(
             "Monto", 
             key=f"input_{cliente['ID_Cliente']}", 
             value=None, 
+            step=1,              # <-- Permite poner números enteros de corrido (ej: 10200)
+            format="%d",         # <-- Fuerza formato de número entero visualmente al escribir
             placeholder="", 
             label_visibility="collapsed",
             on_change=guardar_y_avanzar
@@ -312,6 +317,6 @@ else:
             </div>
             """, unsafe_allow_html=True)
         with col_clear:
-            if st.button("❌ Vaciar Caja", use_container_width=True, help="Reinicia el contador de efectivo a cero"):
+            if st.button("❌ Vaciar Caja", use_container_width=True):
                 st.session_state.total_efectivo_caja = 0.0
                 st.rerun()
