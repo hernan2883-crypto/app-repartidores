@@ -162,8 +162,8 @@ else:
             matriz_clientes = sh.worksheet("Clientes").get_all_values()
             df_cli = pd.DataFrame(matriz_clientes[1:], columns=matriz_clientes[0])
             
-            # Buscamos exactamente 'Cant_Miñon' con la Ñ
-            columnas_num = ['salida', 'Deuda Anterior', 'Cant_Pan', 'Cant_Miñon', 'Cant_Galletas', 'Cant_Figaza', 'Cant_Negritos', 'Cant_Facturas']
+            # Agregamos 'Saldo Nuevo' (Columna M) al procesamiento numérico inicial
+            columnas_num = ['salida', 'Deuda Anterior', 'Saldo Nuevo', 'Cant_Pan', 'Cant_Miñon', 'Cant_Galletas', 'Cant_Figaza', 'Cant_Negritos', 'Cant_Facturas']
             for c in columnas_num:
                 if c in df.columns:
                     df[c] = pd.to_numeric(df[c].str.replace(',', '.'), errors='coerce').fillna(0)
@@ -210,15 +210,9 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
-        # --- LECTURA DEL SALDO NUEVO DESDE COLUMNA M (13) ---
-        try:
-            ws_control = sh.worksheet("Control-Diario")
-            fila_excel_actual = int(cliente['excel_row'])
-            # Columna M es la 13
-            valor_saldo_raw = ws_control.cell(fila_excel_actual, 13).value
-            saldo_nuevo = float(str(valor_saldo_raw).replace(',', '.')) if valor_saldo_raw else 0.0
-        except Exception:
-            saldo_nuevo = 0.0
+        # --- LECTURA DIRECTA DE SALDO NUEVO DESDE COLUMNA M ---
+        # Se toma directamente del DataFrame procesado de forma estática y veloz
+        saldo_nuevo = float(cliente.get('Saldo Nuevo', 0.0))
 
         st.markdown(f"<div style='text-align:center; margin-bottom:10px;'><span style='font-size:14px; color:#7F8C8D;'>⚠️ SALDO NUEVO: </span><span style='color:#C0392B; font-size:20px; font-weight:900;'>${saldo_nuevo:,.2f}</span></div>", unsafe_allow_html=True)
         st.markdown("<p style='text-align:center; font-size:16px; font-weight:bold; color:#27AE60; margin-bottom:2px;'>MONTO A COBRAR:</p>", unsafe_allow_html=True)
@@ -261,6 +255,7 @@ else:
         st.markdown("<p style='font-size:14px; font-weight:bold; color:#34495E; margin-top:10px; margin-bottom:5px;'>📦 Cantidades:</p>", unsafe_allow_html=True)
         
         p_pan = float(cliente['Cant_Pan'])
+        # Lectura directa de Cant_Miñon sin rodeos
         p_min = float(cliente['Cant_Miñon'])
         p_gal = float(cliente['Cant_Galletas'])
         p_fig = float(cliente['Cant_Figaza'])
@@ -286,4 +281,9 @@ else:
             st.number_input("Figazas", key=f"figaza_{cliente['ID_Cliente']}", value=p_fig, format="%.1f", label_visibility="collapsed", on_change=guardar_cantidad_dia, args=(cliente['ID_Cliente'], 6, f"figaza_{cliente['ID_Cliente']}"))
             
         with col5:
-            st.markdown("<p class='notranslate' translate='no' style='text-align:center; font-size:11px; font-weight:
+            st.markdown("<p class='notranslate' translate='no' style='text-align:center; font-size:11px; font-weight:bold; margin-bottom:2px; color:#34495E;'>Negritos</p>", unsafe_allow_html=True)
+            st.number_input("Negritos", key=f"negrito_{cliente['ID_Cliente']}", value=p_neg, format="%.1f", label_visibility="collapsed", on_change=guardar_cantidad_dia, args=(cliente['ID_Cliente'], 7, f"negrito_{cliente['ID_Cliente']}"))
+            
+        with col6:
+            st.markdown("<p class='notranslate' translate='no' style='text-align:center; font-size:11px; font-weight:bold; margin-bottom:2px; color:#34495E;'>Facturas</p>", unsafe_allow_html=True)
+            st.number_input("Facturas", key=f"facturas_{cliente['ID_Cliente']}", value=p_fac, step=1, label_visibility="collapsed", on_change=guardar_cantidad_dia, args=(cliente['ID_Cliente'], 8, f"facturas_{cliente['ID_Cliente']}"))
