@@ -92,7 +92,13 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- LÓGICA DE GUARDADO DE MONTO ---
+# --- INICIALIZACIÓN DE VARIABLES GLOBALES ---
+if 'cliente_actual_idx' not in st.session_state: st.session_state.cliente_actual_idx = 0
+if 'reparto_seleccionado' not in st.session_state: st.session_state.reparto_seleccionado = None
+if 'dia_semana_reparto' not in st.session_state: st.session_state.dia_semana_reparto = dia_actual
+if 'total_efectivo_caja' not in st.session_state: st.session_state.total_efectivo_caja = 0.0
+
+# --- LÓGICA DE GUARDADO DE MONTO Y SUMA ---
 def guardar_y_avanzar():
     idx = st.session_state.cliente_actual_idx
     cliente_actual = st.session_state.clientes_reparto.iloc[idx]
@@ -107,6 +113,10 @@ def guardar_y_avanzar():
             
             # Guardar Monto en la columna 12 (Pagos) de Google Sheets
             ws.update_cell(fila_excel, 12, monto)
+            
+            # --- CASILLERO SUMADOR ---
+            # Sumamos el pago ingresado al acumulador de la caja en efectivo
+            st.session_state.total_efectivo_caja += float(monto)
             
             st.toast(f"✅ Guardado online: ${monto} - {cliente_actual['Cliente']}", icon="🍞")
             st.session_state.cliente_actual_idx += 1
@@ -130,11 +140,6 @@ def guardar_cantidad_dia(id_cliente, col_idx, key_name):
                 st.error(f"No se encontró el ID {id_cliente} en la hoja {dia}")
         except Exception as e:
             st.error(f"Error al actualizar cantidad en la hoja {dia}: {e}")
-
-# --- INICIALIZACIÓN ---
-if 'cliente_actual_idx' not in st.session_state: st.session_state.cliente_actual_idx = 0
-if 'reparto_seleccionado' not in st.session_state: st.session_state.reparto_seleccionado = None
-if 'dia_semana_reparto' not in st.session_state: st.session_state.dia_semana_reparto = dia_actual
 
 # --- NAVEGACIÓN ---
 if st.session_state.reparto_seleccionado is None:
@@ -176,14 +181,24 @@ else:
     if idx >= total_clientes:
         st.balloons()
         st.success("¡Reparto terminado!")
+        
+        # --- PANTALLA FINAL: SE MUESTRA EL TOTAL DE EFECTIVO QUE DEBE TENER ---
+        st.markdown(f"""
+        <div style="background-color:#FFF; padding:20px; border-radius:15px; border: 3px solid #27AE60; text-align:center; margin-top:15px; margin-bottom:15px;">
+            <p style="margin:0; color:#2C3E50; font-size:18px; font-weight:bold;">💵 TOTAL EFECTIVO RECOLECTADO:</p>
+            <h1 style="margin:5px 0 0 0; color:#27AE60; font-size:48px; font-weight:900;">${st.session_state.total_efectivo_caja:,.2f}</h1>
+        </div>
+        """, unsafe_allow_html=True)
+        
         if st.button("⬅️ Revisar Último Cliente", use_container_width=True):
             st.session_state.cliente_actual_idx = total_clientes - 1
             st.session_state.dia_semana_reparto = dia_actual
             st.rerun()
-        if st.button("🔄 Volver al Menú Principal", use_container_width=True): 
+        if st.button("🔄 Volver al Menú Principal (Reinicia Caja)", use_container_width=True): 
             st.session_state.reparto_seleccionado = None
             st.session_state.cliente_actual_idx = 0
             st.session_state.dia_semana_reparto = dia_actual
+            st.session_state.total_efectivo_caja = 0.0  # Se limpia para el próximo reparto
             if 'clientes_reparto' in st.session_state: del st.session_state.clientes_reparto
             st.rerun()
     else:
@@ -211,7 +226,6 @@ else:
         """, unsafe_allow_html=True)
         
         # --- LECTURA DIRECTA DE SALDO NUEVO DESDE COLUMNA M ---
-        # Se toma directamente del DataFrame procesado de forma estática y veloz
         saldo_nuevo = float(cliente.get('Saldo Nuevo', 0.0))
 
         st.markdown(f"<div style='text-align:center; margin-bottom:10px;'><span style='font-size:14px; color:#7F8C8D;'>⚠️ SALDO NUEVO: </span><span style='color:#C0392B; font-size:20px; font-weight:900;'>${saldo_nuevo:,.2f}</span></div>", unsafe_allow_html=True)
@@ -255,7 +269,6 @@ else:
         st.markdown("<p style='font-size:14px; font-weight:bold; color:#34495E; margin-top:10px; margin-bottom:5px;'>📦 Cantidades:</p>", unsafe_allow_html=True)
         
         p_pan = float(cliente['Cant_Pan'])
-        # Lectura directa de Cant_Miñon sin rodeos
         p_min = float(cliente['Cant_Miñon'])
         p_gal = float(cliente['Cant_Galletas'])
         p_fig = float(cliente['Cant_Figaza'])
@@ -287,3 +300,18 @@ else:
         with col6:
             st.markdown("<p class='notranslate' translate='no' style='text-align:center; font-size:11px; font-weight:bold; margin-bottom:2px; color:#34495E;'>Facturas</p>", unsafe_allow_html=True)
             st.number_input("Facturas", key=f"facturas_{cliente['ID_Cliente']}", value=p_fac, step=1, label_visibility="collapsed", on_change=guardar_cantidad_dia, args=(cliente['ID_Cliente'], 8, f"facturas_{cliente['ID_Cliente']}"))
+
+        # --- CASILLERO BLANCO ABAJO DE TODO EN VIVO ---
+        st.markdown("<br>", unsafe_allow_html=True)
+        col_caja, col_clear = st.columns([3, 1])
+        with col_caja:
+            st.markdown(f"""
+            <div style="background-color:#FFF; padding:10px; border-radius:10px; border: 2px solid #BDC3C7; text-align:center;">
+                <span style="color:#7F8C8D; font-size:13px; font-weight:bold;">💵 TOTAL EN CAJA EN VIVO: </span>
+                <span style="color:#2C3E50; font-size:18px; font-weight:900; margin-left:10px;">${st.session_state.total_efectivo_caja:,.2f}</span>
+            </div>
+            """, unsafe_allow_html=True)
+        with col_clear:
+            if st.button("❌ Vaciar Caja", use_container_width=True, help="Reinicia el contador de efectivo a cero"):
+                st.session_state.total_efectivo_caja = 0.0
+                st.rerun()
