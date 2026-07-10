@@ -137,6 +137,15 @@ def guardar_cantidad_dia(id_cliente, col_idx, key_name):
         except Exception as e:
             st.error(f"Error al actualizar cantidad en la hoja {dia}: {e}")
 
+# --- NUEVO: LÓGICA DE GUARDADO EN VIVO PARA BOLSAS (COLUMNA P = 16) ---
+def guardar_bolsas_control_diario(fila_excel, nuevo_valor):
+    try:
+        ws = sh.worksheet("Control-Diario")
+        ws.update_cell(fila_excel, 16, nuevo_valor)  # Columna P es la número 16
+        st.toast(f"🎒 Bolsas actualizadas online: {nuevo_valor}", icon="📦")
+    except Exception as e:
+        st.error(f"Error al guardar bolsas en Control-Diario: {e}")
+
 # --- NAVEGACIÓN ---
 if st.session_state.reparto_seleccionado is None:
     st.title("🍞 Selección de Reparto")
@@ -163,11 +172,10 @@ else:
             matriz_clientes = sh.worksheet("Clientes").get_all_values()
             df_cli = pd.DataFrame(matriz_clientes[1:], columns=matriz_clientes[0])
             
-            # Procesamiento de datos numéricos iniciales
-            columnas_num = ['salida', 'Deuda Anterior', 'Saldo Nuevo', 'Cant_Pan', 'Cant_Miñon', 'Cant_Galletas', 'Cant_Figaza', 'Cant_Negritos', 'Cant_Facturas']
+            # Procesamiento de datos numéricos iniciales (Agregamos BOLSAS al mapeo)
+            columnas_num = ['salida', 'Deuda Anterior', 'Saldo Nuevo', 'Cant_Pan', 'Cant_Miñon', 'Cant_Galletas', 'Cant_Figaza', 'Cant_Negritos', 'Cant_Facturas', 'BOLSAS']
             for c in columnas_num:
                 if c in df.columns:
-                    # Reemplazamos puntos por nada si actúan como miles, o manejamos el texto limpio
                     df[c] = df[c].astype(str).str.replace('$', '', regex=False).str.strip()
                     df[c] = pd.to_numeric(df[c].str.replace(',', '.'), errors='coerce').fillna(0)
 
@@ -224,7 +232,6 @@ else:
         
         # --- CORRECCIÓN DE DECIMALES Y MULTIPLICADOR DE SALDO ---
         valor_base = float(cliente.get('Saldo Nuevo', 0.0))
-        # Si el saldo quedó guardado como 66.3 cuando debería ser 66300, ajustamos la escala de miles.
         if 0 < valor_base < 1000 and '.' in str(cliente.get('Saldo Nuevo', '')):
             saldo_nuevo = valor_base * 1000
         else:
@@ -233,13 +240,13 @@ else:
         st.markdown(f"<div style='text-align:center; margin-bottom:10px;'><span style='font-size:14px; color:#7F8C8D;'>⚠️ SALDO NUEVO: </span><span style='color:#C0392B; font-size:20px; font-weight:900;'>${saldo_nuevo:,.2f}</span></div>", unsafe_allow_html=True)
         st.markdown("<p style='text-align:center; font-size:16px; font-weight:bold; color:#27AE60; margin-bottom:2px;'>MONTO A COBRAR:</p>", unsafe_allow_html=True)
         
-        # --- CAMBIO: PASADO A PASO ENTERO (Sin declarar decimales obligatorios al tipear) ---
+        # --- CAMBIO: PASADO A PASO ENTERO ---
         st.number_input(
             "Monto", 
             key=f"input_{cliente['ID_Cliente']}", 
             value=None, 
-            step=1,              # <-- Permite poner números enteros de corrido (ej: 10200)
-            format="%d",         # <-- Fuerza formato de número entero visualmente al escribir
+            step=1,              
+            format="%d",         
             placeholder="", 
             label_visibility="collapsed",
             on_change=guardar_y_avanzar
@@ -305,6 +312,44 @@ else:
         with col6:
             st.markdown("<p class='notranslate' translate='no' style='text-align:center; font-size:11px; font-weight:bold; margin-bottom:2px; color:#34495E;'>Facturas</p>", unsafe_allow_html=True)
             st.number_input("Facturas", key=f"facturas_{cliente['ID_Cliente']}", value=p_fac, step=1, label_visibility="collapsed", on_change=guardar_cantidad_dia, args=(cliente['ID_Cliente'], 8, f"facturas_{cliente['ID_Cliente']}"))
+
+        # --- NUEVO: SECCIÓN DE BOLSAS CON BOTONES MÁS / MENOS (SIN TECLADO TÁCTIL) ---
+        st.markdown("<p style='font-size:14px; font-weight:bold; color:#34495E; margin-top:15px; margin-bottom:5px;'>🎒 Control de Bolsas (Sin Teclado):</p>", unsafe_allow_html=True)
+        
+        id_cli = cliente['ID_Cliente']
+        key_bolsas = f"bolsas_{id_cli}"
+        
+        # Inicializamos en session_state el valor real que venga de la columna P
+        if key_bolsas not in st.session_state:
+            try:
+                st.session_state[key_bolsas] = int(float(cliente.get('BOLSAS', 0)))
+            except:
+                st.session_state[key_bolsas] = 0
+
+        # Diseño de botonera en 3 columnas: [ ➖ ] [ Número Grande ] [ ➕ ]
+        col_b_menos, col_b_val, col_b_mas = st.columns([1, 1, 1])
+        
+        with col_b_menos:
+            if st.button("➖", key=f"btn_menos_{id_cli}", use_container_width=True):
+                st.session_state[key_bolsas] -= 1
+                # Guarda instantáneamente en la columna P (16) de Control-Diario
+                guardar_bolsas_control_diario(int(cliente['excel_row']), st.session_state[key_bolsas])
+                st.rerun()
+                
+        with col_b_val:
+            # Casillero blanco bien vistoso, centrado y bloqueado al teclado
+            st.markdown(f"""
+            <div style="background-color:#FFFFFF; border:2px solid #BDC3C7; border-radius:8px; height:38px; display:flex; align-items:center; justify-content:center;">
+                <h3 style="margin:0; color:#2C3E50; font-weight:900; text-align:center; font-size:20px;">{st.session_state[key_bolsas]}</h3>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with col_b_mas:
+            if st.button("➕", key=f"btn_mas_{id_cli}", use_container_width=True):
+                st.session_state[key_bolsas] += 1
+                # Guarda instantáneamente en la columna P (16) de Control-Diario
+                guardar_bolsas_control_diario(int(cliente['excel_row']), st.session_state[key_bolsas])
+                st.rerun()
 
         # --- CASILLERO BLANCO ABAJO DE TODO EN VIVO ---
         st.markdown("<br>", unsafe_allow_html=True)
