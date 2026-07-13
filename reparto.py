@@ -94,50 +94,74 @@ if 'cliente_actual_idx' not in st.session_state: st.session_state.cliente_actual
 if 'reparto_seleccionado' not in st.session_state: st.session_state.reparto_seleccionado = None
 if 'dia_semana_reparto' not in st.session_state: st.session_state.dia_semana_reparto = dia_actual
 if 'total_efectivo_caja' not in st.session_state: st.session_state.total_efectivo_caja = 0.0
+if 'col_pago_name' not in st.session_state: st.session_state.col_pago_name = None
 
-# --- LÓGICA DE GUARDADO DE MONTO Y SUMA ---
-def guardar_y_avanzar():
+# --- [MEJORA 1 y 4] LÓGICA DE GUARDADO DE MONTO POR BOTÓN CON MATEMÁTICA EN VIVO ---
+def guardar_y_avanzar_pago():
     idx = st.session_state.cliente_actual_idx
     cliente_actual = st.session_state.clientes_reparto.iloc[idx]
     clave_input = f"input_{cliente_actual['ID_Cliente']}"
+    col_pago = st.session_state.col_pago_name
     
     monto = st.session_state.get(clave_input)
+    monto_val = float(monto) if monto is not None else 0.0
     
-    if monto is not None and monto > 0:
-        try:
-            ws = sh.worksheet("Control-Diario")
-            fila_excel = int(cliente_actual['excel_row'])
-            
-            # Guardamos el monto tal cual lo escribís (entero o con coma)
-            ws.update_cell(fila_excel, 12, monto)
-            
-            # Sumamos al acumulador en vivo
-            st.session_state.total_efectivo_caja += float(monto)
-            
-            st.toast(f"✅ Guardado online: ${monto} - {cliente_actual['Cliente']}", icon="🍞")
-            st.session_state.cliente_actual_idx += 1
-            st.session_state.dia_semana_reparto = dia_actual
-        except Exception as e:
-            st.error(f"Error al guardar en Google Sheets: {e}")
+    try:
+        ws = sh.worksheet("Control-Diario")
+        fila_excel = int(cliente_actual['excel_row'])
+        
+        # Guardamos el monto en Google Sheets (Columna 12)
+        ws.update_cell(fila_excel, 12, monto_val)
+        
+        # Modificamos el DataFrame local al instante para impacto inmediato en pantalla
+        st.session_state.clientes_reparto.at[idx, col_pago] = monto_val
+        
+        # Recalculamos el acumulador de caja sumando en vivo la columna del reparto actual
+        st.session_state.total_efectivo_caja = float(st.session_state.clientes_reparto[col_pago].sum())
+        
+        st.toast(f"✅ Pago cargado: ${monto_val} - {cliente_actual['Cliente']}", icon="🍞")
+        st.session_state.cliente_actual_idx += 1
+        st.session_state.dia_semana_reparto = dia_actual
+    except Exception as e:
+        st.error(f"Error al guardar en Google Sheets: {e}")
 
-# --- LÓGICA DE GUARDADO DE CANTIDADES EN LA HOJA DEL DÍA ---
-def guardar_cantidad_dia(id_cliente, col_idx, key_name):
-    val = st.session_state.get(key_name)
+# --- [MEJORA 2] LÓGICA CENTRALIZADA PARA GUARDAR TODAS LAS CANTIDADES DEL PEDIDO ---
+def guardar_todos_los_cambios_productos(cliente):
+    id_cliente = cliente['ID_Cliente']
     dia = st.session_state.dia_semana_reparto
-    if val is not None:
-        try:
-            ws = sh.worksheet(dia)
-            celda = ws.find(str(id_cliente), in_column=1)
+    try:
+        ws = sh.worksheet(dia)
+        celda = ws.find(str(id_cliente), in_column=1)
+        
+        if celda:
+            val_pan = st.session_state.get(f"pan_{id_cliente}", 0.0)
+            val_min = st.session_state.get(f"minones_{id_cliente}", 0.0)
+            val_gal = st.session_state.get(f"galletas_{id_cliente}", 0.0)
+            val_fig = st.session_state.get(f"figaza_{id_cliente}", 0.0)
+            val_neg = st.session_state.get(f"negrito_{id_cliente}", 0.0)
+            val_fac = st.session_state.get(f"facturas_{id_cliente}", 0)
             
-            if celda:
-                ws.update_cell(celda.row, col_idx, val)
-                st.toast(f"💾 Modificado en {dia}: {val}", icon="📦")
-            else:
-                st.error(f"No se encontró el ID {id_cliente} en la hoja {dia}")
-        except Exception as e:
-            st.error(f"Error al actualizar cantidad en la hoja {dia}: {e}")
+            # Guardamos secuencialmente los 6 productos de la fila (Columnas 3 a 8)
+            valores = [val_pan, val_min, val_gal, val_fig, val_neg, val_fac]
+            for i, val in enumerate(valores, start=3):
+                ws.update_cell(celda.row, i, val)
+            
+            # Actualizamos localmente el DataFrame para que refleje los cambios al instante
+            idx = st.session_state.cliente_actual_idx
+            st.session_state.clientes_reparto.at[idx, 'Cant_Pan'] = val_pan
+            st.session_state.clientes_reparto.at[idx, 'Cant_Miñon'] = val_min
+            st.session_state.clientes_reparto.at[idx, 'Cant_Galletas'] = val_gal
+            st.session_state.clientes_reparto.at[idx, 'Cant_Figaza'] = val_fig
+            st.session_state.clientes_reparto.at[idx, 'Cant_Negritos'] = val_neg
+            st.session_state.clientes_reparto.at[idx, 'Cant_Facturas'] = val_fac
+            
+            st.toast(f"💾 Cambios guardados en pestaña {dia}", icon="📦")
+        else:
+            st.error(f"No se encontró el ID {id_cliente} en la hoja {dia}")
+    except Exception as e:
+        st.error(f"Error al actualizar cantidades en {dia}: {e}")
 
-# --- NUEVO: LÓGICA DE GUARDADO EN VIVO PARA BOLSAS (COLUMNA P = 16) ---
+# --- LÓGICA DE GUARDADO EN VIVO PARA BOLSAS (COLUMNA P = 16) ---
 def guardar_bolsas_control_diario(fila_excel, nuevo_valor):
     try:
         ws = sh.worksheet("Control-Diario")
@@ -169,17 +193,34 @@ else:
             df = pd.DataFrame(matriz_control[1:], columns=matriz_control[0])
             df['excel_row'] = df.index + 2
             
+            # Detectamos el nombre real de la columna 12 de pagos
+            col_pago_name = matriz_control[0][11]
+            st.session_state.col_pago_name = col_pago_name
+            
             matriz_clientes = sh.worksheet("Clientes").get_all_values()
             df_cli = pd.DataFrame(matriz_clientes[1:], columns=matriz_clientes[0])
             
-            # Procesamiento de datos numéricos iniciales (Agregamos BOLSAS al mapeo)
-            columnas_num = ['salida', 'Deuda Anterior', 'Saldo Nuevo', 'Cant_Pan', 'Cant_Miñon', 'Cant_Galletas', 'Cant_Figaza', 'Cant_Negritos', 'Cant_Facturas', 'BOLSAS']
+            # Procesamiento de datos numéricos iniciales (Agregamos la columna de PAGO dinámica)
+            columnas_num = ['salida', 'Deuda Anterior', 'Saldo Nuevo', 'Cant_Pan', 'Cant_Miñon', 'Cant_Galletas', 'Cant_Figaza', 'Cant_Negritos', 'Cant_Facturas', 'BOLSAS', col_pago_name]
             for c in columnas_num:
                 if c in df.columns:
                     df[c] = df[c].astype(str).str.replace('$', '', regex=False).str.strip()
                     df[c] = pd.to_numeric(df[c].str.replace(',', '.'), errors='coerce').fillna(0)
 
-            st.session_state.clientes_reparto = df.merge(df_cli[['ID_Cliente', 'Zona / Reparto']], on='ID_Cliente').query(f"`Zona / Reparto` == '{st.session_state.reparto_seleccionado}'").sort_values('salida').reset_index(drop=True)
+            df_filtrado = df.merge(df_cli[['ID_Cliente', 'Zona / Reparto']], on='ID_Cliente').query(f"`Zona / Reparto` == '{st.session_state.reparto_seleccionado}'").sort_values('salida').reset_index(drop=True)
+            st.session_state.clientes_reparto = df_filtrado
+            
+            # --- [MEJORA 3] LÓGICA DE MEMORIA INTELIGENTE (AUTO-RESUME) ---
+            # 1. Sumamos en vivo todo lo que ya se cobró efectivamente en este reparto
+            st.session_state.total_efectivo_caja = float(df_filtrado[col_pago_name].sum())
+            
+            # 2. Posicionamos automáticamente en el primer cliente que tenga el casillero de pago en 0
+            clientes_sin_pago = df_filtrado[df_filtrado[col_pago_name] == 0]
+            if not clientes_sin_pago.empty:
+                st.session_state.cliente_actual_idx = int(clientes_sin_pago.index[0])
+            else:
+                # Si todos ya pagaron, lo dejamos al final en la pantalla de meta cumplida
+                st.session_state.cliente_actual_idx = len(df_filtrado)
 
     idx = st.session_state.cliente_actual_idx
     total_clientes = len(st.session_state.clientes_reparto)
@@ -237,20 +278,39 @@ else:
         else:
             saldo_nuevo = valor_base
 
-        st.markdown(f"<div style='text-align:center; margin-bottom:10px;'><span style='font-size:14px; color:#7F8C8D;'>⚠️ SALDO NUEVO: </span><span style='color:#C0392B; font-size:20px; font-weight:900;'>${saldo_nuevo:,.2f}</span></div>", unsafe_allow_html=True)
+        # --- [MEJORA 4] MATEMÁTICA Y RESPUESTA INMEDIATA EN PANTALLA ---
+        col_pago = st.session_state.col_pago_name
+        pago_registrado = float(cliente.get(col_pago, 0.0))
+        saldo_restante = saldo_nuevo - pago_registrado
+
+        st.markdown(f"<div style='text-align:center; margin-bottom:4px;'><span style='font-size:14px; color:#7F8C8D;'>⚠️ DEUDA ORIGINAL: </span><span style='color:#C0392B; font-size:20px; font-weight:900;'>${saldo_nuevo:,.2f}</span></div>", unsafe_allow_html=True)
+        if pago_registrado > 0:
+            st.markdown(f"<div style='text-align:center; margin-bottom:4px;'><span style='font-size:14px; color:#27AE60;'>💵 PAGO REGISTRADO: </span><span style='color:#27AE60; font-size:20px; font-weight:900;'>${pago_registrado:,.2f}</span></div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='text-align:center; margin-bottom:10px;'><span style='font-size:14px; color:#7F8C8D;'>📉 SALDO RESTANTE: </span><span style='color:#2980B9; font-size:20px; font-weight:900;'>${saldo_restante:,.2f}</span></div>", unsafe_allow_html=True)
+        else:
+            st.markdown(f"<div style='text-align:center; margin-bottom:10px;'><span style='font-size:14px; color:#7F8C8D;'>📉 SALDO RESTANTE: </span><span style='color:#C0392B; font-size:20px; font-weight:900;'>${saldo_nuevo:,.2f}</span></div>", unsafe_allow_html=True)
+
         st.markdown("<p style='text-align:center; font-size:16px; font-weight:bold; color:#27AE60; margin-bottom:2px;'>MONTO A COBRAR:</p>", unsafe_allow_html=True)
         
-        # --- CAMBIO: PASADO A PASO ENTERO ---
+        # Seteamos el estado del input basado en si ya tenía un pago guardado (útil al ir hacia atrás)
+        clave_pago_input = f"input_{cliente['ID_Cliente']}"
+        if clave_pago_input not in st.session_state:
+            st.session_state[clave_pago_input] = int(pago_registrado) if pago_registrado > 0 else None
+
+        # --- [MEJORA 1] INPUT SIN EVENTO AUTO-SUBMIT (Eliminado on_change) ---
         st.number_input(
             "Monto", 
-            key=f"input_{cliente['ID_Cliente']}", 
-            value=None, 
+            key=clave_pago_input, 
             step=1,              
             format="%d",         
             placeholder="", 
-            label_visibility="collapsed",
-            on_change=guardar_y_avanzar
+            label_visibility="collapsed"
         )
+        
+        # --- [MEJORA 1] BOTÓN EXPLÍCITO PARA CARGAR EL PAGO ---
+        if st.button("💰 CARGAR PAGO Y AVANZAR", use_container_width=True, type="primary"):
+            guardar_y_avanzar_pago()
+            st.rerun()
         
         col_ant, col_sig = st.columns(2)
         with col_ant:
@@ -280,46 +340,51 @@ else:
         
         st.markdown("<p style='font-size:14px; font-weight:bold; color:#34495E; margin-top:10px; margin-bottom:5px;'>📦 Cantidades:</p>", unsafe_allow_html=True)
         
-        p_pan = float(cliente['Cant_Pan'])
-        p_min = float(cliente['Cant_Miñon'])
-        p_gal = float(cliente['Cant_Galletas'])
-        p_fig = float(cliente['Cant_Figaza'])
-        p_neg = float(cliente['Cant_Negritos'])
-        p_fac = int(cliente['Cant_Facturas'])
-        
+        id_cli = cliente['ID_Cliente']
+        # Inicializamos en session_state las variables de productos para que no se pisen
+        if f"pan_{id_cli}" not in st.session_state: st.session_state[f"pan_{id_cli}"] = float(cliente['Cant_Pan'])
+        if f"minones_{id_cli}" not in st.session_state: st.session_state[f"minones_{id_cli}"] = float(cliente['Cant_Miñon'])
+        if f"galletas_{id_cli}" not in st.session_state: st.session_state[f"galletas_{id_cli}"] = float(cliente['Cant_Galletas'])
+        if f"figaza_{id_cli}" not in st.session_state: st.session_state[f"figaza_{id_cli}"] = float(cliente['Cant_Figaza'])
+        if f"negrito_{id_cli}" not in st.session_state: st.session_state[f"negrito_{id_cli}"] = float(cliente['Cant_Negritos'])
+        if f"facturas_{id_cli}" not in st.session_state: st.session_state[f"facturas_{id_cli}"] = int(cliente['Cant_Facturas'])
+
         col1, col2, col3, col4, col5, col6 = st.columns(6)
         
+        # --- [MEJORA 2] PRODUCTOS SIN GUARDADO AUTOMÁTICO (Eliminado on_change) ---
         with col1:
             st.markdown("<p class='notranslate' translate='no' style='text-align:center; font-size:11px; font-weight:bold; margin-bottom:2px; color:#34495E;'>Pan</p>", unsafe_allow_html=True)
-            st.number_input("Pan", key=f"pan_{cliente['ID_Cliente']}", value=p_pan, format="%.1f", label_visibility="collapsed", on_change=guardar_cantidad_dia, args=(cliente['ID_Cliente'], 3, f"pan_{cliente['ID_Cliente']}"))
+            st.number_input("Pan", key=f"pan_{id_cli}", format="%.1f", label_visibility="collapsed")
             
         with col2:
             st.markdown("<p class='notranslate' translate='no' style='text-align:center; font-size:11px; font-weight:bold; margin-bottom:2px; color:#34495E;'>Miñones</p>", unsafe_allow_html=True)
-            st.number_input("Miñones", key=f"minones_{cliente['ID_Cliente']}", value=p_min, format="%.1f", label_visibility="collapsed", on_change=guardar_cantidad_dia, args=(cliente['ID_Cliente'], 4, f"minones_{cliente['ID_Cliente']}"))
+            st.number_input("Miñones", key=f"minones_{id_cli}", format="%.1f", label_visibility="collapsed")
             
         with col3:
             st.markdown("<p class='notranslate' translate='no' style='text-align:center; font-size:11px; font-weight:bold; margin-bottom:2px; color:#34495E;'>Galletas</p>", unsafe_allow_html=True)
-            st.number_input("Galletas", key=f"galletas_{cliente['ID_Cliente']}", value=p_gal, format="%.1f", label_visibility="collapsed", on_change=guardar_cantidad_dia, args=(cliente['ID_Cliente'], 5, f"galletas_{cliente['ID_Cliente']}"))
+            st.number_input("Galletas", key=f"galletas_{id_cli}", format="%.1f", label_visibility="collapsed")
             
         with col4:
             st.markdown("<p class='notranslate' translate='no' style='text-align:center; font-size:11px; font-weight:bold; margin-bottom:2px; color:#34495E;'>Figazas</p>", unsafe_allow_html=True)
-            st.number_input("Figazas", key=f"figaza_{cliente['ID_Cliente']}", value=p_fig, format="%.1f", label_visibility="collapsed", on_change=guardar_cantidad_dia, args=(cliente['ID_Cliente'], 6, f"figaza_{cliente['ID_Cliente']}"))
+            st.number_input("Figazas", key=f"figaza_{id_cli}", format="%.1f", label_visibility="collapsed")
             
         with col5:
             st.markdown("<p class='notranslate' translate='no' style='text-align:center; font-size:11px; font-weight:bold; margin-bottom:2px; color:#34495E;'>Negritos</p>", unsafe_allow_html=True)
-            st.number_input("Negritos", key=f"negrito_{cliente['ID_Cliente']}", value=p_neg, format="%.1f", label_visibility="collapsed", on_change=guardar_cantidad_dia, args=(cliente['ID_Cliente'], 7, f"negrito_{cliente['ID_Cliente']}"))
+            st.number_input("Negritos", key=f"negrito_{id_cli}", format="%.1f", label_visibility="collapsed")
             
         with col6:
             st.markdown("<p class='notranslate' translate='no' style='text-align:center; font-size:11px; font-weight:bold; margin-bottom:2px; color:#34495E;'>Facturas</p>", unsafe_allow_html=True)
-            st.number_input("Facturas", key=f"facturas_{cliente['ID_Cliente']}", value=p_fac, step=1, label_visibility="collapsed", on_change=guardar_cantidad_dia, args=(cliente['ID_Cliente'], 8, f"facturas_{cliente['ID_Cliente']}"))
+            st.number_input("Facturas", key=f"facturas_{id_cli}", step=1, label_visibility="collapsed")
 
-        # --- NUEVO: SECCIÓN DE BOLSAS CON BOTONES MÁS / MENOS (SIN TECLADO TÁCTIL) ---
+        # --- [MEJORA 2] BOTÓN EXPLÍCITO PARA GUARDAR EL PEDIDO DE MERCADERÍA ---
+        if st.button("💾 GUARDAR CAMBIOS EN PEDIDO", use_container_width=True):
+            guardar_todos_los_cambios_productos(cliente)
+            st.rerun()
+
+        # --- SECCIÓN DE BOLSAS CON BOTONES MÁS / MENOS (SIN TECLADO TÁCTIL) ---
         st.markdown("<p style='font-size:14px; font-weight:bold; color:#34495E; margin-top:15px; margin-bottom:5px;'>🎒 Control de Bolsas (Sin Teclado):</p>", unsafe_allow_html=True)
         
-        id_cli = cliente['ID_Cliente']
         key_bolsas = f"bolsas_{id_cli}"
-        
-        # Inicializamos en session_state el valor real que venga de la columna P
         if key_bolsas not in st.session_state:
             try:
                 st.session_state[key_bolsas] = int(float(cliente.get('BOLSAS', 0)))
@@ -332,12 +397,10 @@ else:
         with col_b_menos:
             if st.button("➖", key=f"btn_menos_{id_cli}", use_container_width=True):
                 st.session_state[key_bolsas] -= 1
-                # Guarda instantáneamente en la columna P (16) de Control-Diario
                 guardar_bolsas_control_diario(int(cliente['excel_row']), st.session_state[key_bolsas])
                 st.rerun()
                 
         with col_b_val:
-            # Casillero blanco bien vistoso, centrado y bloqueado al teclado
             st.markdown(f"""
             <div style="background-color:#FFFFFF; border:2px solid #BDC3C7; border-radius:8px; height:38px; display:flex; align-items:center; justify-content:center;">
                 <h3 style="margin:0; color:#2C3E50; font-weight:900; text-align:center; font-size:20px;">{st.session_state[key_bolsas]}</h3>
@@ -347,7 +410,6 @@ else:
         with col_b_mas:
             if st.button("➕", key=f"btn_mas_{id_cli}", use_container_width=True):
                 st.session_state[key_bolsas] += 1
-                # Guarda instantáneamente en la columna P (16) de Control-Diario
                 guardar_bolsas_control_diario(int(cliente['excel_row']), st.session_state[key_bolsas])
                 st.rerun()
 
