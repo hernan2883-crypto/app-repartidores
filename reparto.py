@@ -92,11 +92,12 @@ st.markdown("""
 # --- INICIALIZACIÓN DE VARIABLES GLOBALES ---
 if 'cliente_actual_idx' not in st.session_state: st.session_state.cliente_actual_idx = 0
 if 'reparto_seleccionado' not in st.session_state: st.session_state.reparto_seleccionado = None
+if 'repartidor_nombre' not in st.session_state: st.session_state.repartidor_nombre = None
 if 'dia_semana_reparto' not in st.session_state: st.session_state.dia_semana_reparto = dia_actual
 if 'total_efectivo_caja' not in st.session_state: st.session_state.total_efectivo_caja = 0.0
 if 'col_pago_name' not in st.session_state: st.session_state.col_pago_name = None
 
-# --- [MEJORA 1 y 4] LÓGICA DE GUARDADO DE MONTO POR BOTÓN CON MATEMÁTICA EN VIVO ---
+# --- LÓGICA DE GUARDADO DE MONTO POR BOTÓN CON MATEMÁTICA EN VIVO ---
 def guardar_y_avanzar_pago():
     idx = st.session_state.cliente_actual_idx
     cliente_actual = st.session_state.clientes_reparto.iloc[idx]
@@ -125,7 +126,7 @@ def guardar_y_avanzar_pago():
     except Exception as e:
         st.error(f"Error al guardar en Google Sheets: {e}")
 
-# --- [MEJORA 2] LÓGICA CENTRALIZADA PARA GUARDAR TODAS LAS CANTIDADES DEL PEDIDO ---
+# --- LÓGICA CENTRALIZADA PARA GUARDAR TODAS LAS CANTIDADES DEL PEDIDO ---
 def guardar_todos_los_cambios_productos(cliente):
     id_cliente = cliente['ID_Cliente']
     dia = st.session_state.dia_semana_reparto
@@ -139,7 +140,7 @@ def guardar_todos_los_cambios_productos(cliente):
             val_gal = st.session_state.get(f"galletas_{id_cliente}", 0.0)
             val_fig = st.session_state.get(f"figaza_{id_cliente}", 0.0)
             val_neg = st.session_state.get(f"negrito_{id_cliente}", 0.0)
-            val_fac = st.session_state.get(f"facturas_{id_cliente}", 0)
+            val_fac = st.session_state.get(f"facturas_{id_cli}", 0)
             
             # Guardamos secuencialmente los 6 productos de la fila (Columnas 3 a 8)
             valores = [val_pan, val_min, val_gal, val_fig, val_neg, val_fac]
@@ -170,21 +171,51 @@ def guardar_bolsas_control_diario(fila_excel, nuevo_valor):
     except Exception as e:
         st.error(f"Error al guardar bolsas en Control-Diario: {e}")
 
-# --- NAVEGACIÓN ---
+# --- NAVEGACIÓN Y ACCESO POR CÓDIGO ---
 if st.session_state.reparto_seleccionado is None:
-    st.title("🍞 Selección de Reparto")
-    if st.button("👨‍🍳 REPARTO P (Papá)", use_container_width=True): 
-        st.session_state.reparto_seleccionado = "P"
-        st.session_state.cliente_actual_idx = 0
-        st.session_state.dia_semana_reparto = dia_actual
-        if 'clientes_reparto' in st.session_state: del st.session_state.clientes_reparto
-        st.rerun()
-    if st.button("🚚 REPARTO C (Chelo)", use_container_width=True): 
-        st.session_state.reparto_seleccionado = "C"
-        st.session_state.cliente_actual_idx = 0
-        st.session_state.dia_semana_reparto = dia_actual
-        if 'clientes_reparto' in st.session_state: del st.session_state.clientes_reparto
-        st.rerun()
+    st.title("🔐 Acceso Repartidores")
+    st.markdown("### Ingresá tu código de seguridad para iniciar:")
+    
+    # Campo de password
+    codigo_ingresado = st.text_input("Código", type="password", label_visibility="collapsed", key="login_codigo")
+    
+    if st.button("Ingresar 🔓", use_container_width=True, type="primary"):
+        if codigo_ingresado:
+            try:
+                with st.spinner("Validando código con la planilla..."):
+                    # Leemos la nueva pestaña de seguridad
+                    ws_rep = sh.worksheet("Repartidores")
+                    matriz_rep = ws_rep.get_all_values()
+                    df_rep = pd.DataFrame(matriz_rep[1:], columns=matriz_rep[0])
+                    
+                    # Limpieza rápida por si hay espacios
+                    df_rep.columns = df_rep.columns.str.strip()
+                    df_rep['Codigo'] = df_rep['Codigo'].astype(str).str.strip()
+                    df_rep['Reparto'] = df_rep['Reparto'].astype(str).str.strip()
+                    df_rep['Repartidor'] = df_rep['Repartidor'].astype(str).str.strip()
+                    
+                    # Buscamos coincidencia exacta de código
+                    match = df_rep[df_rep['Codigo'] == str(codigo_ingresado).strip()]
+                    
+                    if not match.empty:
+                        repartidor_info = match.iloc[0]
+                        
+                        # Guardamos en sesión el reparto y el nombre real del chofer
+                        st.session_state.reparto_seleccionado = repartidor_info['Reparto']
+                        st.session_state.repartidor_nombre = repartidor_info['Repartidor']
+                        st.session_state.cliente_actual_idx = 0
+                        st.session_state.dia_semana_reparto = dia_actual
+                        if 'clientes_reparto' in st.session_state: del st.session_state.clientes_reparto
+                        
+                        st.success(f"🔓 ¡Acceso correcto! Bienvenido {repartidor_info['Repartidor']}")
+                        st.rerun()
+                    else:
+                        st.error("❌ Código incorrecto. Verificá los datos.")
+            except Exception as e:
+                st.error(f"Error al verificar seguridad: {e}")
+                st.info("💡 Asegurate de que la pestaña 'Repartidores' exista en el Excel y tenga las columnas: Repartidor, Codigo, Reparto")
+        else:
+            st.warning("⚠️ Por favor, escribí un código.")
 else:
     if 'clientes_reparto' not in st.session_state:
         with st.spinner("Cargando datos desde Google Sheets..."):
@@ -210,7 +241,7 @@ else:
             df_filtrado = df.merge(df_cli[['ID_Cliente', 'Zona / Reparto']], on='ID_Cliente').query(f"`Zona / Reparto` == '{st.session_state.reparto_seleccionado}'").sort_values('salida').reset_index(drop=True)
             st.session_state.clientes_reparto = df_filtrado
             
-            # --- [MEJORA 3] LÓGICA DE MEMORIA INTELIGENTE (AUTO-RESUME) ---
+            # --- LÓGICA DE MEMORIA INTELIGENTE (AUTO-RESUME) ---
             # 1. Sumamos en vivo todo lo que ya se cobró efectivamente en este reparto
             st.session_state.total_efectivo_caja = float(df_filtrado[col_pago_name].sum())
             
@@ -240,8 +271,9 @@ else:
             st.session_state.cliente_actual_idx = total_clientes - 1
             st.session_state.dia_semana_reparto = dia_actual
             st.rerun()
-        if st.button("🔄 Volver al Menú Principal (Reinicia Caja)", use_container_width=True): 
+        if st.button("🔄 Salir de la Sesión (Bloquear App)", use_container_width=True): 
             st.session_state.reparto_seleccionado = None
+            st.session_state.repartidor_nombre = None
             st.session_state.cliente_actual_idx = 0
             st.session_state.dia_semana_reparto = dia_actual
             st.session_state.total_efectivo_caja = 0.0
@@ -250,15 +282,17 @@ else:
     else:
         cliente = st.session_state.clientes_reparto.iloc[idx]
         
-        col_menu, col_orden = st.columns([1, 3])
+        col_menu, col_orden = st.columns([1.2, 2.8])
         with col_menu:
-            if st.button("🏠 Menú", use_container_width=True):
+            if st.button("🔒 Salir", use_container_width=True):
                 st.session_state.reparto_seleccionado = None
+                st.session_state.repartidor_nombre = None
                 st.session_state.dia_semana_reparto = dia_actual
                 if 'clientes_reparto' in st.session_state: del st.session_state.clientes_reparto
                 st.rerun()
         with col_orden:
-            st.markdown(f"<p style='text-align:right; color:#7F8C8D; font-weight:bold; margin-top:5px;'>Reparto {st.session_state.reparto_seleccionado} | Orden: #{int(cliente['salida'])}</p>", unsafe_allow_html=True)
+            nombre_repartidor = st.session_state.get('repartidor_nombre', st.session_state.reparto_seleccionado)
+            st.markdown(f"<p style='text-align:right; color:#7F8C8D; font-weight:bold; margin-top:5px;'>🚚 {nombre_repartidor} | Orden: #{int(cliente['salida'])}</p>", unsafe_allow_html=True)
         
         progreso = idx / total_clientes
         st.progress(progreso)
@@ -278,7 +312,7 @@ else:
         else:
             saldo_nuevo = valor_base
 
-        # --- [MEJORA 4] MATEMÁTICA Y RESPUESTA INMEDIATA EN PANTALLA ---
+        # --- MATEMÁTICA Y RESPUESTA INMEDIATA EN PANTALLA ---
         col_pago = st.session_state.col_pago_name
         pago_registrado = float(cliente.get(col_pago, 0.0))
         saldo_restante = saldo_nuevo - pago_registrado
@@ -297,7 +331,7 @@ else:
         if clave_pago_input not in st.session_state:
             st.session_state[clave_pago_input] = int(pago_registrado) if pago_registrado > 0 else None
 
-        # --- [MEJORA 1] INPUT SIN EVENTO AUTO-SUBMIT (Eliminado on_change) ---
+        # --- INPUT SIN EVENTO AUTO-SUBMIT (Eliminado on_change) ---
         st.number_input(
             "Monto", 
             key=clave_pago_input, 
@@ -307,7 +341,7 @@ else:
             label_visibility="collapsed"
         )
         
-        # --- [MEJORA 1] BOTÓN EXPLÍCITO PARA CARGAR EL PAGO ---
+        # --- BOTÓN EXPLÍCITO PARA CARGAR EL PAGO ---
         if st.button("💰 CARGAR PAGO Y AVANZAR", use_container_width=True, type="primary"):
             guardar_y_avanzar_pago()
             st.rerun()
@@ -351,7 +385,7 @@ else:
 
         col1, col2, col3, col4, col5, col6 = st.columns(6)
         
-        # --- [MEJORA 2] PRODUCTOS SIN GUARDADO AUTOMÁTICO (Eliminado on_change) ---
+        # --- PRODUCTOS SIN GUARDADO AUTOMÁTICO (Eliminado on_change) ---
         with col1:
             st.markdown("<p class='notranslate' translate='no' style='text-align:center; font-size:11px; font-weight:bold; margin-bottom:2px; color:#34495E;'>Pan</p>", unsafe_allow_html=True)
             st.number_input("Pan", key=f"pan_{id_cli}", format="%.1f", label_visibility="collapsed")
@@ -376,7 +410,7 @@ else:
             st.markdown("<p class='notranslate' translate='no' style='text-align:center; font-size:11px; font-weight:bold; margin-bottom:2px; color:#34495E;'>Facturas</p>", unsafe_allow_html=True)
             st.number_input("Facturas", key=f"facturas_{id_cli}", step=1, label_visibility="collapsed")
 
-        # --- [MEJORA 2] BOTÓN EXPLÍCITO PARA GUARDAR EL PEDIDO DE MERCADERÍA ---
+        # --- BOTÓN EXPLÍCITO PARA GUARDAR EL PEDIDO DE MERCADERÍA ---
         if st.button("💾 GUARDAR CAMBIOS EN PEDIDO", use_container_width=True):
             guardar_todos_los_cambios_productos(cliente)
             st.rerun()
