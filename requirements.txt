@@ -1,1 +1,5 @@
-GSPREAD
+gspread
+google-auth
+pandas
+streamlit>=1.38.0
+starlette<0.40.0
