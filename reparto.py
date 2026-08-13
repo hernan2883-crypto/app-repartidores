@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import gspread
 import datetime
-import json  # <-- Librería necesaria para leer tu clave en limpio
+import json
 import streamlit.components.v1 as components
 
 # --- DETECCIÓN AUTOMÁTICA DEL DÍA REAL ---
@@ -89,29 +89,29 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- RECUPERACIÓN / PERSISTENCIA DE ESTADO DESDE URL (ANTI-BLOQUEO DE PANTALLA) ---
+# --- RECUPERACIÓN / PERSISTENCIA DE ESTADO DESDE URL Y CONTROL DE SESIÓN ---
 q_params = st.query_params
 
-if 'reparto_seleccionado' not in st.session_state or st.session_state.reparto_seleccionado is None:
-    if 'rep' in q_params:
-        st.session_state.reparto_seleccionado = q_params['rep']
+if 'reparto_seleccionado' not in st.session_state:
+    st.session_state.reparto_seleccionado = q_params.get('rep', None)
 
-if 'repartidor_nombre' not in st.session_state or st.session_state.repartidor_nombre is None:
-    if 'rep_nom' in q_params:
-        st.session_state.repartidor_nombre = q_params['rep_nom']
+if 'repartidor_nombre' not in st.session_state:
+    st.session_state.repartidor_nombre = q_params.get('rep_nom', None)
 
 if 'cliente_actual_idx' not in st.session_state:
-    if 'idx' in q_params:
-        try:
-            st.session_state.cliente_actual_idx = int(q_params['idx'])
-        except ValueError:
-            st.session_state.cliente_actual_idx = 0
-    else:
+    try:
+        st.session_state.cliente_actual_idx = int(q_params.get('idx', 0))
+    except ValueError:
         st.session_state.cliente_actual_idx = 0
 
-if 'dia_semana_reparto' not in st.session_state: st.session_state.dia_semana_reparto = dia_actual
-if 'total_efectivo_caja' not in st.session_state: st.session_state.total_efectivo_caja = 0.0
-if 'col_pago_name' not in st.session_state: st.session_state.col_pago_name = None
+if 'dia_semana_reparto' not in st.session_state: 
+    st.session_state.dia_semana_reparto = dia_actual
+
+if 'total_efectivo_caja' not in st.session_state: 
+    st.session_state.total_efectivo_caja = 0.0
+
+if 'col_pago_name' not in st.session_state: 
+    st.session_state.col_pago_name = None
 
 # --- LÓGICA DE GUARDADO DE MONTO POR BOTÓN CON MATEMÁTICA EN VIVO ---
 def guardar_y_avanzar_pago():
@@ -159,7 +159,7 @@ def guardar_todos_los_cambios_productos(cliente):
             val_gal = st.session_state.get(f"galletas_{id_cliente}", 0.0)
             val_fig = st.session_state.get(f"figaza_{id_cliente}", 0.0)
             val_neg = st.session_state.get(f"negrito_{id_cliente}", 0.0)
-            val_fac = st.session_state.get(f"facturas_{id_cliente}", 0)  # <-- Corregido id_cliente
+            val_fac = st.session_state.get(f"facturas_{id_cliente}", 0)
             
             # Guardamos secuencialmente los 6 productos de la fila (Columnas 3 a 8)
             valores = [val_pan, val_min, val_gal, val_fig, val_neg, val_fac]
@@ -191,7 +191,7 @@ def guardar_bolsas_control_diario(fila_excel, nuevo_valor):
         st.error(f"Error al guardar bolsas en Control-Diario: {e}")
 
 # --- NAVEGACIÓN Y ACCESO POR CÓDIGO ---
-if st.session_state.reparto_seleccionado is None:
+if not st.session_state.get('reparto_seleccionado'):
     st.title("🔐 Acceso Repartidores")
     st.markdown("### Ingresá tu código de seguridad para iniciar:")
     
@@ -226,7 +226,8 @@ if st.session_state.reparto_seleccionado is None:
                         st.query_params["rep_nom"] = repartidor_info['Repartidor']
                         st.query_params["idx"] = 0
                         
-                        if 'clientes_reparto' in st.session_state: del st.session_state.clientes_reparto
+                        if 'clientes_reparto' in st.session_state: 
+                            del st.session_state.clientes_reparto
                         
                         st.success(f"🔓 ¡Acceso correcto! Bienvenido {repartidor_info['Repartidor']}")
                         st.rerun()
