@@ -40,20 +40,46 @@ if (!doc._globalFocusHandler) {{
 </script>
 """, height=0)
 
-# --- CSS: RESALTE DE CONTRASTE Y ANTI-TRADUCCIÓN ---
+# --- CSS: ESTILOS, MARGENES MÓVILES Y OCULTAR BOTONES + Y - ---
 st.markdown("""
     <style>
-    .block-container { padding: 10px !important; }
+    /* 1. MARGEN SUPERIOR PARA CELULAR VERTICAL (Evita pegarse al techo de la pantalla) */
+    .block-container { 
+        padding-top: 42px !important; 
+        padding-left: 10px !important; 
+        padding-right: 10px !important; 
+        padding-bottom: 15px !important; 
+    }
     
-    /* 1. INPUT GIGANTE: Monto a Cobrar (TEXTO BLANCO FORZADO) */
+    /* 2. ELIMINAR TOTALMENTE BOTONES + Y - EN TODOS LOS INPUTS NUMÉRICOS */
+    div[data-testid="stNumberInputStepUp"], 
+    div[data-testid="stNumberInputStepDown"],
+    button[data-testid="stNumberInputStepUp"], 
+    button[data-testid="stNumberInputStepDown"],
+    button[aria-label="Step Up"], 
+    button[aria-label="Step Down"],
+    button[aria-label="Increment"],
+    button[aria-label="Decrement"] { 
+        display: none !important; 
+    }
+    input[type=number]::-webkit-inner-spin-button, 
+    input[type=number]::-webkit-outer-spin-button { 
+        -webkit-appearance: none !important; 
+        margin: 0 !important; 
+    }
+    input[type=number] { 
+        -moz-appearance: textfield !important; 
+    }
+    
+    /* 3. INPUT GIGANTE: Monto a Cobrar (TEXTO BLANCO FORZADO) */
     div[data-testid="stNumberInput"]:has(input[aria-label="Monto"]) div[data-baseweb="input"] {
         background-color: #27AE60 !important;
         border: 4px solid #219653 !important;
         border-radius: 15px !important;
-        height: 90px !important;
+        height: 85px !important;
     }
     div[data-testid="stNumberInput"]:has(input[aria-label="Monto"]) input {
-        font-size: 45px !important;
+        font-size: 42px !important;
         font-weight: 900 !important;
         text-align: center !important;
         color: #ffffff !important;
@@ -65,7 +91,20 @@ st.markdown("""
         -webkit-text-fill-color: #ffffff !important;
     }
     
-    /* 2. CUADRITOS CHICOS: Fondo oscuro y texto BLANCO */
+    /* 4. BOTÓN MERCADO PAGO ESTILIZADO EN AZUL */
+    .mp-button button {
+        background-color: #009EE3 !important;
+        color: #ffffff !important;
+        border: 2px solid #0081B4 !important;
+        font-weight: 900 !important;
+        font-size: 15px !important;
+    }
+    .mp-button button:hover {
+        background-color: #0081B4 !important;
+        color: #ffffff !important;
+    }
+
+    /* 5. CUADRITOS CHICOS: Fondo oscuro y texto BLANCO */
     div[data-testid="stNumberInput"]:not(:has(input[aria-label="Monto"])) div[data-baseweb="input"] {
         background-color: #34495E !important;
         border: 2px solid #2C3E50 !important;
@@ -85,7 +124,6 @@ st.markdown("""
         color: #ffffff !important;
         -webkit-text-fill-color: #ffffff !important;
     }
-    button[aria-label="Step Up"], button[aria-label="Step Down"] { display: none !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -113,30 +151,33 @@ if 'total_efectivo_caja' not in st.session_state:
 if 'col_pago_name' not in st.session_state: 
     st.session_state.col_pago_name = None
 
-# --- LÓGICA DE GUARDADO DE MONTO POR BOTÓN CON MATEMÁTICA EN VIVO ---
-def guardar_y_avanzar_pago():
+# --- LÓGICA DE GUARDADO DE MONTO (EFECTIVO EN COL 12 / MERCADO PAGO EN COL 17) ---
+def guardar_y_avanzar_pago(metodo="efectivo"):
     idx = st.session_state.cliente_actual_idx
     cliente_actual = st.session_state.clientes_reparto.iloc[idx]
     clave_input = f"input_{cliente_actual['ID_Cliente']}"
     col_pago = st.session_state.col_pago_name
     
     monto = st.session_state.get(clave_input)
-    monto_val = float(monto) if monto is not None else 0.0
+    monto_val = float(monto) if (monto is not None and str(monto).strip() != "") else 0.0
     
     try:
         ws = sh.worksheet("Control-Diario")
         fila_excel = int(cliente_actual['excel_row'])
         
-        # Guardamos el monto en Google Sheets (Columna 12)
-        ws.update_cell(fila_excel, 12, monto_val)
-        
-        # Modificamos el DataFrame local al instante para impacto inmediato en pantalla
-        st.session_state.clientes_reparto.at[idx, col_pago] = monto_val
-        
-        # Recalculamos el acumulador de caja sumando en vivo la columna del reparto actual
-        st.session_state.total_efectivo_caja = float(st.session_state.clientes_reparto[col_pago].sum())
-        
-        st.toast(f"✅ Pago cargado: ${monto_val} - {cliente_actual['Cliente']}", icon="🍞")
+        if metodo == "mercadopago":
+            # Guardamos en la Columna Q (Columna 17 en Google Sheets)
+            ws.update_cell(fila_excel, 17, monto_val)
+            st.toast(f"💙 Mercado Pago cargado: ${monto_val:,.0f} - {cliente_actual['Cliente']}", icon="💳")
+        else:
+            # Guardamos el monto en Efectivo en la Columna L (Columna 12)
+            ws.update_cell(fila_excel, 12, monto_val)
+            
+            # Modificamos el DataFrame local para reflejarlo en vivo
+            st.session_state.clientes_reparto.at[idx, col_pago] = monto_val
+            st.session_state.total_efectivo_caja = float(st.session_state.clientes_reparto[col_pago].sum())
+            
+            st.toast(f"✅ Efectivo cargado: ${monto_val:,.0f} - {cliente_actual['Cliente']}", icon="💵")
         
         # Avanzamos y actualizamos parámetro URL
         st.session_state.cliente_actual_idx += 1
@@ -161,12 +202,10 @@ def guardar_todos_los_cambios_productos(cliente):
             val_neg = st.session_state.get(f"negrito_{id_cliente}", 0.0)
             val_fac = st.session_state.get(f"facturas_{id_cliente}", 0)
             
-            # Guardamos secuencialmente los 6 productos de la fila (Columnas 3 a 8)
             valores = [val_pan, val_min, val_gal, val_fig, val_neg, val_fac]
             for i, val in enumerate(valores, start=3):
                 ws.update_cell(celda.row, i, val)
             
-            # Actualizamos localmente el DataFrame para que refleje los cambios al instante
             idx = st.session_state.cliente_actual_idx
             st.session_state.clientes_reparto.at[idx, 'Cant_Pan'] = val_pan
             st.session_state.clientes_reparto.at[idx, 'Cant_Miñon'] = val_min
@@ -185,7 +224,7 @@ def guardar_todos_los_cambios_productos(cliente):
 def guardar_bolsas_control_diario(fila_excel, nuevo_valor):
     try:
         ws = sh.worksheet("Control-Diario")
-        ws.update_cell(fila_excel, 16, nuevo_valor)  # Columna P es la número 16
+        ws.update_cell(fila_excel, 16, nuevo_valor)
         st.toast(f"🎒 Bolsas actualizadas online: {nuevo_valor}", icon="📦")
     except Exception as e:
         st.error(f"Error al guardar bolsas en Control-Diario: {e}")
@@ -195,7 +234,6 @@ if not st.session_state.get('reparto_seleccionado'):
     st.title("🔐 Acceso Repartidores")
     st.markdown("### Ingresá tu código de seguridad para iniciar:")
     
-    # Campo de password
     codigo_ingresado = st.text_input("Código", type="password", label_visibility="collapsed", key="login_codigo")
     
     if st.button("Ingresar 🔓", use_container_width=True, type="primary"):
@@ -216,7 +254,6 @@ if not st.session_state.get('reparto_seleccionado'):
                     if not match.empty:
                         repartidor_info = match.iloc[0]
                         
-                        # Guardamos en sesión y en URL para reconexión automática
                         st.session_state.reparto_seleccionado = repartidor_info['Reparto']
                         st.session_state.repartidor_nombre = repartidor_info['Repartidor']
                         st.session_state.cliente_actual_idx = 0
@@ -246,14 +283,12 @@ else:
             df = pd.DataFrame(matriz_control[1:], columns=matriz_control[0])
             df['excel_row'] = df.index + 2
             
-            # Detectamos el nombre real de la columna 12 de pagos
             col_pago_name = matriz_control[0][11]
             st.session_state.col_pago_name = col_pago_name
             
             matriz_clientes = sh.worksheet("Clientes").get_all_values()
             df_cli = pd.DataFrame(matriz_clientes[1:], columns=matriz_clientes[0])
             
-            # Procesamiento de datos numéricos iniciales
             columnas_num = ['salida', 'Deuda Anterior', 'Saldo Nuevo', 'Cant_Pan', 'Cant_Miñon', 'Cant_Galletas', 'Cant_Figaza', 'Cant_Negritos', 'Cant_Facturas', 'BOLSAS', col_pago_name]
             for c in columnas_num:
                 if c in df.columns:
@@ -263,10 +298,8 @@ else:
             df_filtrado = df.merge(df_cli[['ID_Cliente', 'Zona / Reparto']], on='ID_Cliente').query(f"`Zona / Reparto` == '{st.session_state.reparto_seleccionado}'").sort_values('salida').reset_index(drop=True)
             st.session_state.clientes_reparto = df_filtrado
             
-            # --- LÓGICA DE MEMORIA INTELIGENTE ---
             st.session_state.total_efectivo_caja = float(df_filtrado[col_pago_name].sum())
             
-            # Si no venimos de una URL con índice guardado, posicionamos en el primer cliente sin pago
             if 'idx' not in q_params:
                 clientes_sin_pago = df_filtrado[df_filtrado[col_pago_name] == 0]
                 if not clientes_sin_pago.empty:
@@ -302,6 +335,8 @@ else:
     else:
         cliente = st.session_state.clientes_reparto.iloc[idx]
         
+        # --- ENCABEZADO CON ESPACIADO EXTRA PARA CELULAR VERTICAL ---
+        st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
         col_menu, col_orden = st.columns([1.2, 2.8])
         with col_menu:
             if st.button("🔒 Salir", use_container_width=True):
@@ -310,7 +345,7 @@ else:
                 st.rerun()
         with col_orden:
             nombre_repartidor = st.session_state.get('repartidor_nombre', st.session_state.reparto_seleccionado)
-            st.markdown(f"<p style='text-align:right; color:#7F8C8D; font-weight:bold; margin-top:5px;'>🚚 {nombre_repartidor} | Orden: #{int(cliente['salida'])}</p>", unsafe_allow_html=True)
+            st.markdown(f"<p style='text-align:right; color:#7F8C8D; font-weight:bold; margin-top:8px;'>🚚 {nombre_repartidor} | Orden: #{int(cliente['salida'])}</p>", unsafe_allow_html=True)
         
         progreso = idx / total_clientes
         st.progress(progreso)
@@ -323,14 +358,13 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
-        # --- CORRECCIÓN DE DECIMALES Y MULTIPLICADOR DE SALDO ---
+        # --- DEUDA Y SALDOS ---
         valor_base = float(cliente.get('Saldo Nuevo', 0.0))
         if 0 < valor_base < 1000 and '.' in str(cliente.get('Saldo Nuevo', '')):
             saldo_nuevo = valor_base * 1000
         else:
             saldo_nuevo = valor_base
 
-        # --- MATEMÁTICA Y RESPUESTA INMEDIATA EN PANTALLA ---
         col_pago = st.session_state.col_pago_name
         pago_registrado = float(cliente.get(col_pago, 0.0))
         saldo_restante = saldo_nuevo - pago_registrado
@@ -344,12 +378,11 @@ else:
 
         st.markdown("<p style='text-align:center; font-size:16px; font-weight:bold; color:#27AE60; margin-bottom:2px;'>MONTO A COBRAR:</p>", unsafe_allow_html=True)
         
-        # Seteamos el estado del input basado en si ya tenía un pago guardado
         clave_pago_input = f"input_{cliente['ID_Cliente']}"
         if clave_pago_input not in st.session_state:
             st.session_state[clave_pago_input] = int(pago_registrado) if pago_registrado > 0 else None
 
-        # --- INPUT SIN EVENTO AUTO-SUBMIT ---
+        # --- INPUT LIMPIO SIN BOTONES + / - ---
         st.number_input(
             "Monto", 
             key=clave_pago_input, 
@@ -359,10 +392,20 @@ else:
             label_visibility="collapsed"
         )
         
-        # --- BOTÓN EXPLÍCITO PARA CARGAR EL PAGO ---
-        if st.button("💰 CARGAR PAGO Y AVANZAR", use_container_width=True, type="primary"):
-            guardar_y_avanzar_pago()
-            st.rerun()
+        # --- DOS BOTONES DE PAGO: EFECTIVO (COL L) / MERCADO PAGO (COL Q) ---
+        col_btn_ef, col_btn_mp = st.columns(2)
+        
+        with col_btn_ef:
+            if st.button("💵 EFECTIVO", use_container_width=True, type="primary"):
+                guardar_y_avanzar_pago(metodo="efectivo")
+                st.rerun()
+
+        with col_btn_mp:
+            st.markdown('<div class="mp-button">', unsafe_allow_html=True)
+            if st.button("💙 MERCADO PAGO", use_container_width=True):
+                guardar_y_avanzar_pago(metodo="mercadopago")
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
         
         col_ant, col_sig = st.columns(2)
         with col_ant:
@@ -433,7 +476,7 @@ else:
             guardar_todos_los_cambios_productos(cliente)
             st.rerun()
 
-        # --- SECCIÓN DE BOLSAS CON BOTONES MÁS / MENOS (SIN TECLADO TÁCTIL) ---
+        # --- SECCIÓN DE BOLSAS CON BOTONES MÁS / MENOS ---
         st.markdown("<p style='font-size:14px; font-weight:bold; color:#34495E; margin-top:15px; margin-bottom:5px;'>🎒 Control de Bolsas (Sin Teclado):</p>", unsafe_allow_html=True)
         
         key_bolsas = f"bolsas_{id_cli}"
