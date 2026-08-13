@@ -43,7 +43,7 @@ if (!doc._globalFocusHandler) {{
 # --- CSS: ESTILOS, MARGENES MÓVILES Y OCULTAR BOTONES + Y - ---
 st.markdown("""
     <style>
-    /* 1. MARGEN SUPERIOR PARA CELULAR VERTICAL (Evita pegarse al techo de la pantalla) */
+    /* 1. MARGEN SUPERIOR PARA CELULAR VERTICAL */
     .block-container { 
         padding-top: 42px !important; 
         padding-left: 10px !important; 
@@ -71,7 +71,7 @@ st.markdown("""
         -moz-appearance: textfield !important; 
     }
     
-    /* 3. INPUT GIGANTE: Monto a Cobrar (TEXTO BLANCO FORZADO) */
+    /* 3. INPUT GIGANTE: Monto a Cobrar */
     div[data-testid="stNumberInput"]:has(input[aria-label="Monto"]) div[data-baseweb="input"] {
         background-color: #27AE60 !important;
         border: 4px solid #219653 !important;
@@ -91,17 +91,17 @@ st.markdown("""
         -webkit-text-fill-color: #ffffff !important;
     }
     
-    /* 4. BOTÓN MERCADO PAGO ESTILIZADO EN AZUL */
+    /* 4. BOTÓN MERCADO PAGO AMARILLO */
     .mp-button button {
-        background-color: #009EE3 !important;
-        color: #ffffff !important;
-        border: 2px solid #0081B4 !important;
+        background-color: #FFE600 !important;
+        color: #2D3277 !important;
+        border: 2px solid #D6C200 !important;
         font-weight: 900 !important;
         font-size: 15px !important;
     }
     .mp-button button:hover {
-        background-color: #0081B4 !important;
-        color: #ffffff !important;
+        background-color: #E6D000 !important;
+        color: #2D3277 !important;
     }
 
     /* 5. CUADRITOS CHICOS: Fondo oscuro y texto BLANCO */
@@ -168,7 +168,7 @@ def guardar_y_avanzar_pago(metodo="efectivo"):
         if metodo == "mercadopago":
             # Guardamos en la Columna Q (Columna 17 en Google Sheets)
             ws.update_cell(fila_excel, 17, monto_val)
-            st.toast(f"💙 Mercado Pago cargado: ${monto_val:,.0f} - {cliente_actual['Cliente']}", icon="💳")
+            st.toast(f"💳 Mercado Pago cargado: ${monto_val:,.0f} - {cliente_actual['Cliente']}", icon="🟡")
         else:
             # Guardamos el monto en Efectivo en la Columna L (Columna 12)
             ws.update_cell(fila_excel, 12, monto_val)
@@ -382,7 +382,7 @@ else:
         if clave_pago_input not in st.session_state:
             st.session_state[clave_pago_input] = int(pago_registrado) if pago_registrado > 0 else None
 
-        # --- INPUT LIMPIO SIN BOTONES + / - ---
+        # --- INPUT LIMPIO ---
         st.number_input(
             "Monto", 
             key=clave_pago_input, 
@@ -392,7 +392,7 @@ else:
             label_visibility="collapsed"
         )
         
-        # --- DOS BOTONES DE PAGO: EFECTIVO (COL L) / MERCADO PAGO (COL Q) ---
+        # --- BOTONES DE PAGO DERECHOS ---
         col_btn_ef, col_btn_mp = st.columns(2)
         
         with col_btn_ef:
@@ -402,7 +402,7 @@ else:
 
         with col_btn_mp:
             st.markdown('<div class="mp-button">', unsafe_allow_html=True)
-            if st.button("💙 MERCADO PAGO", use_container_width=True):
+            if st.button("MERCADO PAGO", use_container_width=True):
                 guardar_y_avanzar_pago(metodo="mercadopago")
                 st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
@@ -476,7 +476,7 @@ else:
             guardar_todos_los_cambios_productos(cliente)
             st.rerun()
 
-        # --- SECCIÓN DE BOLSAS CON BOTONES MÁS / MENOS ---
+        # --- SECCIÓN DE BOLSAS ---
         st.markdown("<p style='font-size:14px; font-weight:bold; color:#34495E; margin-top:15px; margin-bottom:5px;'>🎒 Control de Bolsas (Sin Teclado):</p>", unsafe_allow_html=True)
         
         key_bolsas = f"bolsas_{id_cli}"
@@ -507,7 +507,7 @@ else:
                 guardar_bolsas_control_diario(int(cliente['excel_row']), st.session_state[key_bolsas])
                 st.rerun()
 
-        # --- CASILLERO BLANCO ABAJO DE TODO EN VIVO ---
+        # --- CASILLERO BLANCO ABAJO DE TODO ---
         st.markdown("<br>", unsafe_allow_html=True)
         col_caja, col_clear = st.columns([3, 1])
         with col_caja:
