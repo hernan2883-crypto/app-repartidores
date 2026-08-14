@@ -91,17 +91,18 @@ st.markdown("""
         -webkit-text-fill-color: #ffffff !important;
     }
     
-    /* 4. BOTÓN MERCADO PAGO AMARILLO */
-    .mp-button button {
+    /* 4. BOTÓN MERCADO PAGO (FONDO AMARILLO Y LETRAS VERDES) */
+    button[aria-label="MERCADO PAGO"] {
         background-color: #FFE600 !important;
-        color: #2D3277 !important;
         border: 2px solid #D6C200 !important;
-        font-weight: 900 !important;
-        font-size: 15px !important;
     }
-    .mp-button button:hover {
+    button[aria-label="MERCADO PAGO"] p {
+        color: #008000 !important;
+        font-weight: 900 !important;
+        font-size: 16px !important;
+    }
+    button[aria-label="MERCADO PAGO"]:hover {
         background-color: #E6D000 !important;
-        color: #2D3277 !important;
     }
 
     /* 5. CUADRITOS CHICOS: Fondo oscuro y texto BLANCO */
@@ -392,7 +393,7 @@ else:
             label_visibility="collapsed"
         )
         
-        # --- BOTONES DE PAGO DERECHOS ---
+        # --- BOTONES DE PAGO ---
         col_btn_ef, col_btn_mp = st.columns(2)
         
         with col_btn_ef:
@@ -401,11 +402,9 @@ else:
                 st.rerun()
 
         with col_btn_mp:
-            st.markdown('<div class="mp-button">', unsafe_allow_html=True)
             if st.button("MERCADO PAGO", use_container_width=True):
                 guardar_y_avanzar_pago(metodo="mercadopago")
                 st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
         
         col_ant, col_sig = st.columns(2)
         with col_ant:
